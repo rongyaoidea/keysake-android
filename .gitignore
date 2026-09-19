@@ -1,0 +1,9 @@
+.gradle/
+build/
+app/build/
+rust-core/target/
+*.iml
+local.properties
+signing.properties
+.DS_Store
+app/src/main/jniLibs/

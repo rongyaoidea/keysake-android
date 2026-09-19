@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Typesake 输入法</string>
+    <string name="ime_name">Typesake 输入法</string>
+    <string name="ime_subtype">中文·英文伴学</string>
+    <string name="hub_title">学习中心</string>
+</resources>
