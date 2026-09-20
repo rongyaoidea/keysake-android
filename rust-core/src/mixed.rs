@@ -9,7 +9,7 @@
 //! 街头/截图/寄托/接替/接头/阶梯，没有「今天」→ 目标句暂时组不出来（用例已 ignore）。
 
 use crate::engine::lookup_cheap;
-use crate::initials;
+use crate::{gramidx, initials};
 use inputx_pinyin::PinyinEngine;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -23,6 +23,46 @@ enum Kind {
 }
 
 /// 首字母 -> 最高频单字（缓存；一次 prefix 扫描约 1–2ms）
+/// 词的声母串（与生成器同一算法：逐字首选读音取首字母）
+fn word_initials(word: &str) -> Option<String> {
+    let py = crate::userdic::name_to_pinyin(word)?;
+    let segs = inputx_pinyin::segment(&py);
+    let first = segs.first()?;
+    if first.syllables.len() != word.chars().count() {
+        return None;
+    }
+    Some(
+        first
+            .syllables
+            .iter()
+            .filter_map(|x| x.chars().next())
+            .collect(),
+    )
+}
+
+/// 声母串匹配的候选词（先查 lex 词库生成的 gram 索引，再退回拼音词典简拼索引）
+fn run_words(run: &str, k: usize) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for w in gramidx::lookup(run, 12)
+        .into_iter()
+        .chain(initials::candidates(run, 4))
+    {
+        if w.chars().count() != run.chars().count() {
+            continue;
+        }
+        if word_initials(&w).as_deref() != Some(run) {
+            continue; // 错桶（多音字）过滤
+        }
+        if !out.contains(&w) {
+            out.push(w);
+            if out.len() >= k {
+                break;
+            }
+        }
+    }
+    out
+}
+
 fn chars_for_initial(eng: &PinyinEngine, letter: char, k: usize) -> Vec<String> {
     fn cache() -> &'static Mutex<HashMap<char, Vec<String>>> {
         static C: OnceLock<Mutex<HashMap<char, Vec<String>>>> = OnceLock::new();
@@ -78,9 +118,7 @@ fn parse(input: &str) -> Option<Vec<(usize, Kind)>> {
                 continue;
             }
             if let Some((sc, _, _)) = dp[start] {
-                let hit = initials::candidates(run, 4)
-                    .into_iter()
-                    .any(|w| w.chars().count() == len);
+                let hit = !run_words(run, 1).is_empty();
                 if hit {
                     let cand = (sc + 6, start, Kind::Run(len));
                     if best.map(|(b, _, _)| cand.0 > b).unwrap_or(true) {
@@ -145,11 +183,7 @@ pub fn compose(eng: &PinyinEngine, input: &str, limit: usize) -> Vec<String> {
                 Kind::Run(len) => {
                     let start = segs[i].0;
                     let run = &input[start..start + len];
-                    parts.push(
-                        initials::candidates(run, 4)
-                            .into_iter()
-                            .find(|x| x.chars().count() == len)?,
-                    );
+                    parts.push(run_words(run, 1).into_iter().next()?);
                     i += 1;
                 }
                 Kind::Abbr => {
@@ -159,12 +193,20 @@ pub fn compose(eng: &PinyinEngine, input: &str, limit: usize) -> Vec<String> {
                         run.push(input.as_bytes()[segs[j].0] as char);
                         j += 1;
                     }
-                    // 索引已按"常用词 > 词频"排序：取第一个字数匹配的即可
+                    // 先查声母串索引（lex 词库），再退回拼音词典简拼索引
                     let mut got: Option<String> = None;
-                    for w in initials::candidates(&run, 8) {
+                    for w in gramidx::lookup(&run, 8) {
                         if w.chars().count() == run.chars().count() {
                             got = Some(w);
                             break;
+                        }
+                    }
+                    if got.is_none() {
+                        for w in initials::candidates(&run, 8) {
+                            if w.chars().count() == run.chars().count() {
+                                got = Some(w);
+                                break;
+                            }
                         }
                     }
                     if got.is_none() {
@@ -203,9 +245,18 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "简拼索引数据源受限：165k 拼音词典无「今天」词条（只有单字），需改用 lex.bin 建声母串索引"]
+    #[ignore = "DP 打分仍偏向最长 Run（wjt -> 舞剧团）而非拆分（w+jt -> 我+今天）；                需引入上下文/bigram 打分并对 Run 长度加惩罚，且待查 parse 在长串上的可达性"]
     fn mixed_shorthand_composes_sentence() {
         let _g = crate::test_lock();
+        // 依赖 CI/本地生成的 gram.bin（lex 词库声母串索引）；缺失时跳过（不影响 CI 其它断言）
+        let base = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../app/src/main/assets/gram.bin"
+        );
+        if crate::gramidx::load(base) == 0 {
+            eprintln!("skip: gram.bin 未生成（CI 会生成）");
+            return;
+        }
         let out = compose(eng(), "wjtxiangqugongsi", 3);
         assert!(!out.is_empty(), "混简拼应给出候选");
         assert!(out[0].starts_with('我'), "w -> 我: {}", out[0]);

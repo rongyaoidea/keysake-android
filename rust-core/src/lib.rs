@@ -12,6 +12,7 @@ pub mod biglex;
 pub mod engine;
 pub mod english;
 pub mod ffi;
+pub mod gramidx;
 pub mod initials;
 pub mod mixed;
 pub mod s2t;

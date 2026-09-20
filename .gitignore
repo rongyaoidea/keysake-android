@@ -7,3 +7,6 @@ local.properties
 signing.properties
 .DS_Store
 app/src/main/jniLibs/
+app/src/main/assets/lex.bin
+app/src/main/assets/gram.bin
+app/src/main/assets/sentbank.bin
