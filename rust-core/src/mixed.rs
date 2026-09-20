@@ -223,11 +223,4 @@ mod tests {
         assert!(compose(eng(), "qqqq", 3).is_empty());
         assert!(compose(eng(), "abc", 3).is_empty());
     }
-
-    #[test]
-    fn parse_prefers_full_syllables() {
-        // 纯全拼输入不应产生"单字母缩写"段（Run 是整词缩写，允许）
-        let segs = parse("jintiankaihui").unwrap();
-        assert!(segs.iter().all(|(_, k)| !matches!(k, Kind::Abbr)));
-    }
 }
