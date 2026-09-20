@@ -1657,7 +1657,7 @@ pub fn english_candidates(text: &str) -> Vec<(u8, String)> {
     for (kind, text) in out {
         push_scored(&mut scored, kind, text, 0);
     }
-    scored.sort_by(|a, b| b.2.cmp(&a.2));
+    scored.sort_by_key(|x| std::cmp::Reverse(x.2));
     scored.into_iter().take(3).map(|(k, s, _)| (k, s)).collect()
 }
 
