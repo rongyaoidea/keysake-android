@@ -225,6 +225,8 @@ pub fn lookup(zh: &str, limit: usize) -> Vec<(String, u32)> {
         let mut score: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
         for gram in &grams {
             let postings = b.gram_postings(gram);
+            // CI 的 clippy(1.98) 建议用 as_chunks；这里保持兼容写法并显式允许
+            #[allow(clippy::chunks_exact_to_as_chunks)]
             for chunk in postings.chunks_exact(4) {
                 let id = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
                 *score.entry(id).or_insert(0) += 1;
