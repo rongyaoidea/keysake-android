@@ -527,6 +527,7 @@ class KeyboardView(
 
     private fun showPreview(anchor: View) {
         if (!prefs.keyPreview) return
+        dismissPreview() // 防止上一次气泡未销毁而叠加/残留
         val text = (anchor as? KeyButton)?.key?.label ?: return
         val popup = PopupWindow(
             TextView(context).apply {
@@ -545,6 +546,18 @@ class KeyboardView(
         }
         positionAbove(popup, anchor, dp(40), dp(52))
         preview = popup
+        // 兜底：即便收不到 ACTION_UP（滑出/多指/窗口切换），600ms 后也必须消失
+        handler.postDelayed(previewTimeout, PREVIEW_TIMEOUT_MS)
+    }
+
+    private val previewTimeout = Runnable { dismissPreview() }
+
+    /** 供输入法服务在窗口隐藏/切换时强制清理所有悬浮窗。 */
+    fun dismissAllPopups() = dismissPopups()
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility != View.VISIBLE) dismissPopups()
     }
 
     private fun showAlternates(anchor: View, items: List<String>) {
@@ -591,6 +604,7 @@ class KeyboardView(
     }
 
     private fun dismissPreview() {
+        handler.removeCallbacks(previewTimeout)
         preview?.dismiss()
         preview = null
     }
@@ -610,6 +624,7 @@ class KeyboardView(
 
     private companion object {
         const val LONG_PRESS_MS = 420L
+        const val PREVIEW_TIMEOUT_MS = 600L
         const val SWIPE_THRESHOLD = 60f
         const val SWIPE_THRESHOLD_ORTHO = 90f
     }

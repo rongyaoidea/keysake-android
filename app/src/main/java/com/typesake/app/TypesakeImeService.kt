@@ -67,6 +67,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     private var t9Mode = false
     private var engineReady = false
     private var englishMode = false
+    private var composingInfo: String = ""
     private var pageStart = 0
     private var allCandidates: List<String> = emptyList()
     private var match: TypesakeCore.Match? = null
@@ -196,7 +197,13 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         unregisterClipboard()
         lookupJob?.cancel()
         dismissActionPopup()
+        if (::keyboard.isInitialized) keyboard.dismissAllPopups()
         super.onFinishInputView(finishingInput)
+    }
+
+    override fun onWindowHidden() {
+        if (::keyboard.isInitialized) keyboard.dismissAllPopups()
+        super.onWindowHidden()
     }
 
     override fun onFinishInput() {
@@ -215,10 +222,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         candidateScroll.addView(candidateRow)
         column.addView(
             candidateScroll,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            )
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(CAND_BAR_DP))
         )
 
         // 英文伴学在下
@@ -227,10 +231,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         englishScroll.addView(englishRow)
         column.addView(
             englishScroll,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            )
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(EN_BAR_DP))
         )
 
         val keyboardHost = FrameLayout(this)
@@ -284,6 +285,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         if (!::candidateRow.isInitialized) return
         candidateRow.removeAllViews()
         applyBarBackground(candidateScroll)
+        composingInfo = ""   // 每帧重置，避免纠错提示残留
         val vertical = prefs.verticalCandidates
         candidateRow.orientation = if (vertical) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
 
@@ -304,14 +306,11 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         // 1) 拼音输入中
         if (pinyin.isNotEmpty()) {
             val m = match
-            val label = when {
-                m != null && m.remembered -> "${pinyin}⇒${m.matched}"
-                m != null && m.corrected -> "$pinyin→${m.matched}"
-                else -> pinyin.toString()
-            }
-            candidateRow.addView(textLabel(label, colors.accent, colors.barBg))
-            if (m != null && (m.corrected || m.remembered)) {
-                candidateRow.addView(chip(if (m.remembered) "已记住" else "纠", colors.accentText, colors.accent))
+            // 拼音/纠错信息不再占用候选位：移到下方英文条左侧（见 renderEnglish）
+            composingInfo = when {
+                m != null && m.remembered -> "已记住 $pinyin⇒${m.matched}"
+                m != null && m.corrected -> "已纠错 $pinyin→${m.matched}"
+                else -> ""
             }
             val full = m?.candidates ?: candidates
             val paged = prefs.pageKeys == 1
@@ -439,6 +438,9 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         englishRow.removeAllViews()
         applyBarBackground(englishScroll)
 
+        if (composingInfo.isNotEmpty()) {
+            englishRow.addView(chip(composingInfo, colors.accent, colors.barBg))
+        }
         if (englishChips.isEmpty()) {
             englishRow.addView(
                 chip(
@@ -479,7 +481,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         return TextView(this).apply {
             text = label
             setTextColor(textColor)
-            textSize = 17f
+            textSize = 16f
             maxLines = 1
             gravity = Gravity.CENTER
             setPadding(dp(14), dp(9), dp(14), dp(9))
@@ -507,7 +509,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         textSize = 13f
         maxLines = 1
         gravity = Gravity.CENTER
-        setPadding(dp(10), dp(6), dp(10), dp(6))
+        setPadding(dp(9), dp(4), dp(9), dp(4))
         background = GradientDrawable().apply {
             setColor(bg)
             cornerRadius = dp(8).toFloat()
@@ -555,7 +557,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         setTextColor(color)
         textSize = 14f
         gravity = Gravity.CENTER_VERTICAL
-        setPadding(dp(10), dp(8), dp(4), dp(8))
+        setPadding(dp(8), dp(5), dp(4), dp(5))
         setBackgroundColor(bg)
     }
 
@@ -1196,5 +1198,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     private companion object {
         const val DOUBLE_TAP_MS = 420L
         const val MAX_CLIP = 20
+        const val CAND_BAR_DP = 44
+        const val EN_BAR_DP = 36
     }
 }
