@@ -31,6 +31,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "inputx-fsa"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d0a41cb928b25474611e05c2fd46d4766ed549d733da8bd8390aa0b3be34273"
+
+[[package]]
+name = "inputx-pinyin"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f9e65f356ed708b48b3978ab0c5c40b629df5d2866c6f8b23f5bed8927d5aee"
+dependencies = [
+ "inputx-fsa",
+ "inputx-pinyin-data-bigrams",
+ "inputx-pinyin-data-core",
+]
+
+[[package]]
+name = "inputx-pinyin-data-bigrams"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7964b2992d7c97694854531d6f5c548f6f4f96c7dd76d5443c48dfcceae8375"
+
+[[package]]
+name = "inputx-pinyin-data-core"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd9d4915402a3c3a0d01e305a5328000dfb1497ed53a5ae802eeb0534d178e5f"
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -206,8 +235,9 @@ dependencies = [
 
 [[package]]
 name = "typesake-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "inputx-pinyin",
  "jni",
  "serde",
  "serde_json",
