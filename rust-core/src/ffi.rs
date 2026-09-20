@@ -180,14 +180,35 @@ pub extern "system" fn Java_com_typesake_app_TypesakeCore_setEngineOptions<'loca
     fuzzy: jboolean,
     correction: jboolean,
     shuangpin: jint,
+    script: jint,
 ) -> JString<'local> {
     let scheme = u8::try_from(shuangpin).unwrap_or(0);
+    let plan = u8::try_from(script).unwrap_or(0);
     let out = guarded(
-        || match store::set_settings(fuzzy != 0, correction != 0, scheme) {
+        || match store::set_settings(fuzzy != 0, correction != 0, scheme, plan) {
             Ok(()) => ok_json("\"saved\":1"),
             Err(e) => err_json(&e),
         },
     );
+    rust_to_jstr(&mut env, &out)
+}
+
+/// 简繁转换：to_trad=true 输出繁体，否则输出简体。
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_convertScript<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    jtext: JString<'local>,
+    to_trad: jboolean,
+) -> JString<'local> {
+    let text = jstr_to_rust(&mut env, &jtext);
+    let out = guarded(|| {
+        if to_trad != 0 {
+            crate::s2t::to_traditional(&text)
+        } else {
+            crate::s2t::to_simplified(&text)
+        }
+    });
     rust_to_jstr(&mut env, &out)
 }
 
@@ -346,7 +367,7 @@ pub extern "system" fn Java_com_typesake_app_TypesakeCore_statsInfo<'local>(
         let (fuzzy, correction, shuangpin) = engine::options();
         let days = serde_json::to_string(&st.days).unwrap_or_else(|_| "[]".into());
         ok_json(&format!(
-            "\"words\":{},\"days\":{},\"saved\":{},\"lex\":{},\"ini\":{},\"endict\":{},\"fuzzy\":{},\"correction\":{},\"shuangpin\":{}",
+            "\"words\":{},\"days\":{},\"saved\":{},\"lex\":{},\"ini\":{},\"endict\":{},\"fuzzy\":{},\"correction\":{},\"shuangpin\":{},\"script\":{}",
             st.words,
             days,
             store::saved_count(),
@@ -355,7 +376,8 @@ pub extern "system" fn Java_com_typesake_app_TypesakeCore_statsInfo<'local>(
             english::dict_size(),
             fuzzy,
             correction,
-            shuangpin
+            shuangpin,
+            store::settings().script
         ))
     });
     rust_to_jstr(&mut env, &out)

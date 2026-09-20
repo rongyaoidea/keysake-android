@@ -65,7 +65,7 @@ class MainActivity : ComponentActivity() {
                 withContext(Dispatchers.IO) {
                     TypesakeAssets.ensureEnglishDict(this@MainActivity)
                     TypesakeCore.init(filesDir.absolutePath)
-                    TypesakeCore.setOptions(prefs.fuzzy, prefs.correction, prefs.shuangpin)
+                    TypesakeCore.setOptions(prefs.fuzzy, prefs.correction, prefs.shuangpin, prefs.script)
                 }
                 ready++
             }
@@ -96,6 +96,10 @@ private fun SetupScreen(paletteId: Int, readyTick: Int, onPaletteChange: (Int) -
     var tick by remember { mutableIntStateOf(readyTick) }
     var shuangpin by remember { mutableIntStateOf(prefs.shuangpin) }
     var words by remember(tick) { mutableStateOf(TypesakeCore.myWords()) }
+    var script by remember { mutableIntStateOf(prefs.script) }
+    var vertical by remember { mutableStateOf(prefs.verticalCandidates) }
+    var pageKeys by remember { mutableIntStateOf(prefs.pageKeys) }
+    var customSymbols by remember { mutableStateOf(prefs.customSymbols) }
     var t9 by remember { mutableStateOf(prefs.t9Layout) }
     var trial by remember { mutableStateOf("") }
     var savedFlash by remember { mutableStateOf("") }
@@ -291,10 +295,40 @@ private fun SetupScreen(paletteId: Int, readyTick: Int, onPaletteChange: (Int) -
                     OutlinedButton(onClick = {
                         shuangpin = id
                         prefs.shuangpin = id
-                        TypesakeCore.setOptions(fuzzy, correction, id)
+                        TypesakeCore.setOptions(fuzzy, correction, id, script)
                     }) { Text(label) }
                 }
             }
+        }
+        SwitchRow("输出繁体（简繁转换）", script == 1) {
+            script = if (it) 1 else 0
+            prefs.script = script
+            TypesakeCore.setOptions(fuzzy, correction, shuangpin, script)
+        }
+        SwitchRow("候选竖排", vertical) {
+            vertical = it
+            prefs.verticalCandidates = it
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("逗号句号=二三候选" to 0, "逗号句号=翻页" to 1).forEach { (label, id) ->
+                if (pageKeys == id) {
+                    Button(onClick = {}) { Text(label) }
+                } else {
+                    OutlinedButton(onClick = {
+                        pageKeys = id
+                        prefs.pageKeys = id
+                    }) { Text(label) }
+                }
+            }
+        }
+        OutlinedTextField(
+            value = customSymbols,
+            onValueChange = { customSymbols = it },
+            label = { Text("自定义符号（符号页第一行，最多 10 个）") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedButton(onClick = { prefs.customSymbols = customSymbols; savedFlash = "符号已保存" }) {
+            Text("保存符号")
         }
         SwitchRow("九键输入（T9）", t9) {
             t9 = it
@@ -303,12 +337,12 @@ private fun SetupScreen(paletteId: Int, readyTick: Int, onPaletteChange: (Int) -
         SwitchRow("模糊音（z/zh、n/l、an/ang…）", fuzzy) {
             fuzzy = it
             prefs.fuzzy = it
-            TypesakeCore.setOptions(it, correction, shuangpin)
+            TypesakeCore.setOptions(it, correction, shuangpin, script)
         }
         SwitchRow("击键纠错（邻键/漏键/多键/换位）", correction) {
             correction = it
             prefs.correction = it
-            TypesakeCore.setOptions(fuzzy, it, shuangpin)
+            TypesakeCore.setOptions(fuzzy, it, shuangpin, script)
         }
         Text("按键高度 ${keyHeight.toInt()} dp", style = MaterialTheme.typography.bodyMedium)
         Slider(

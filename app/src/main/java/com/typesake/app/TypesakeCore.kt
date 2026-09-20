@@ -90,7 +90,8 @@ object TypesakeCore {
     @JvmStatic private external fun pinCandidate(pinyin: String, word: String): String
     @JvmStatic private external fun forgetCandidate(pinyin: String, word: String): String
     @JvmStatic private external fun predictNext(word: String): String
-    @JvmStatic private external fun setEngineOptions(fuzzy: Boolean, correction: Boolean, shuangpin: Int): String
+    @JvmStatic private external fun setEngineOptions(fuzzy: Boolean, correction: Boolean, shuangpin: Int, script: Int): String
+    @JvmStatic private external fun convertScript(text: String, toTrad: Boolean): String
     @JvmStatic private external fun setContext(word: String): String
     @JvmStatic private external fun moreCandidates(input: String): String
     @JvmStatic private external fun t9Candidates(digits: String): String
@@ -222,10 +223,16 @@ object TypesakeCore {
         else runCatching { splitDelim(predictNext(word)) }.getOrDefault(emptyList())
 
     /** 写入模糊音/击键纠错/双拼 选项（会落盘）。 */
-    fun setOptions(fuzzy: Boolean, correction: Boolean, shuangpin: Int = 0) {
+    fun setOptions(fuzzy: Boolean, correction: Boolean, shuangpin: Int = 0, script: Int = 0) {
         if (!available) return
-        runCatching { setEngineOptions(fuzzy, correction, shuangpin) }
+        runCatching { setEngineOptions(fuzzy, correction, shuangpin, script) }
         synchronized(cache) { cache.clear() }
+    }
+
+    /** 简繁转换（本地 OpenCC 表）。 */
+    fun convert(text: String, toTrad: Boolean): String {
+        if (!available || text.isEmpty()) return text
+        return runCatching { convertScript(text, toTrad) }.getOrDefault(text)
     }
 
     /** 记录刚上屏的词：bigram 重排 + trigram 联想。 */

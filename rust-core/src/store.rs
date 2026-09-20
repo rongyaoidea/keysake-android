@@ -2,7 +2,7 @@
 //!
 //! 原子写：先写 `<file>.json.tmp` 再 `rename`，避免进程被杀时留下半截 JSON。
 
-use crate::{engine, english};
+use crate::{engine, english, s2t};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -37,6 +37,9 @@ pub struct Settings {
     /// 双拼方案（0=全拼 1=小鹤）
     #[serde(default)]
     pub shuangpin: u8,
+    /// 输出字形（0=简体 1=繁体）
+    #[serde(default)]
+    pub script: u8,
 }
 
 impl Default for Settings {
@@ -45,6 +48,7 @@ impl Default for Settings {
             fuzzy: true,
             correction: true,
             shuangpin: 0,
+            script: 0,
         }
     }
 }
@@ -216,15 +220,29 @@ pub fn settings() -> Settings {
 }
 
 /// 写入输入选项并落盘。
-pub fn set_settings(fuzzy: bool, correction: bool, shuangpin: u8) -> Result<(), String> {
+pub fn set_settings(
+    fuzzy: bool,
+    correction: bool,
+    shuangpin: u8,
+    script: u8,
+) -> Result<(), String> {
     engine::set_options(fuzzy, correction, shuangpin);
     let mut s = store().lock().map_err(|e| e.to_string())?;
     s.settings = Settings {
         fuzzy,
         correction,
         shuangpin,
+        script,
     };
-    write_db_locked(&s)
+    let dir = s.dir.clone();
+    write_db_locked(&s)?;
+    drop(s);
+    let _ = s2t::load_dicts(
+        &Path::new(&dir).join("s2t.tsv").to_string_lossy(),
+        &Path::new(&dir).join("t2s.tsv").to_string_lossy(),
+        script == 1,
+    );
+    Ok(())
 }
 
 /// 修改收藏的英文（收藏可编辑：反哺翻译记忆）。按 (中文, 旧英文) 定位。
@@ -452,11 +470,11 @@ mod tests {
         let dir = tmp_dir("meta");
         init(&dir).unwrap();
 
-        set_settings(false, true, 0).unwrap();
+        set_settings(false, true, 0, 0).unwrap();
         assert_eq!(engine::options(), (false, true, 0));
-        set_settings(true, true, 1).unwrap();
+        set_settings(true, true, 1, 0).unwrap();
         assert_eq!(engine::options().2, 1);
-        set_settings(true, true, 0).unwrap();
+        set_settings(true, true, 0, 0).unwrap();
 
         engine::remember("nihap", "你好");
         bump_stats(3, "2026-09-19").unwrap();

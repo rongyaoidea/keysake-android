@@ -66,6 +66,8 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     private val t9buf = StringBuilder()
     private var t9Mode = false
     private var engineReady = false
+    private var pageStart = 0
+    private var allCandidates: List<String> = emptyList()
     private var match: TypesakeCore.Match? = null
     private var candidates: List<String> = emptyList()
     private var predictions: List<String> = emptyList()
@@ -125,7 +127,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         colors = resolveColors()
         applyGlassBlur()
         if (::keyboard.isInitialized) {
-            keyboard.render(kind, layer, colors, prefs.keyHeightDp, clipItems.toList(), pairList())
+            keyboard.render(kind, layer, colors, prefs.keyHeightDp, clipItems.toList(), pairList(), prefs.customSymbols)
             refreshBars()
         }
     }
@@ -176,8 +178,10 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         colors = resolveColors()
         phrases = loadPhrases()
         if (::keyboard.isInitialized) {
-            keyboard.setOneHand(OneHand.fromInt(prefs.oneHand))
-            keyboard.render(kind, layer, colors, prefs.keyHeightDp, clipItems.toList(), pairList())
+            pageStart = 0
+        allCandidates = emptyList()
+        keyboard.setOneHand(OneHand.fromInt(prefs.oneHand))
+            keyboard.render(kind, layer, colors, prefs.keyHeightDp, clipItems.toList(), pairList(), prefs.customSymbols)
             keyboard.setShift(false, false)
             refreshBars()
         }
@@ -276,6 +280,8 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         if (!::candidateRow.isInitialized) return
         candidateRow.removeAllViews()
         applyBarBackground(candidateScroll)
+        val vertical = prefs.verticalCandidates
+        candidateRow.orientation = if (vertical) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
 
         // 0) 九键输入中
         if (t9Mode && t9buf.isNotEmpty()) {
@@ -303,18 +309,34 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
             if (m != null && (m.corrected || m.remembered)) {
                 candidateRow.addView(chip(if (m.remembered) "已记住" else "纠", colors.accentText, colors.accent))
             }
-            val list = m?.candidates ?: candidates
+            val full = m?.candidates ?: candidates
+            val paged = prefs.pageKeys == 1
+            val perPage = if (vertical) 4 else 8
+            if (paged) {
+                allCandidates = if (allCandidates.isEmpty() || pageStart == 0) full else allCandidates
+            }
+            val list = if (paged) {
+                allCandidates.drop(pageStart).take(perPage)
+            } else {
+                full.take(if (vertical) 4 else 8)
+            }
             if (list.isEmpty()) {
                 candidateRow.addView(textLabel("空格直接上屏", colors.hint, colors.barBg))
             } else {
                 for ((i, word) in list.withIndex()) {
                     candidateRow.addView(
                         candidateChip(
-                            label = if (i < 9) "${i + 1} $word" else word,
+                            label = if (i < 9 && !paged) "${i + 1} $word" else word,
                             word = word,
                         )
                     )
                 }
+            }
+            if (paged && allCandidates.size > pageStart + perPage) {
+                candidateRow.addView(chip("下页 ▸", colors.hint, colors.key) { flipPage(1) })
+            }
+            if (paged && pageStart > 0) {
+                candidateRow.addView(chip("◂ 上页", colors.hint, colors.key) { flipPage(-1) })
             }
             // A3 误纠错一键还原：把原样输入也作为候选
             if (m != null && m.corrected) {
@@ -353,6 +375,25 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
             return
         }
 
+        val before = currentInputConnection?.getTextBeforeCursor(32, 0)?.toString().orEmpty()
+        var shown = false
+        TextUtils.mixedDigitSuggestion(before)?.let { (text, replaceLen) ->
+            shown = true
+            candidateRow.addView(textLabel("数字识别", colors.hint, colors.barBg))
+            candidateRow.addView(chip("→ $text", colors.keyText, colors.key) {
+                replaceTail(replaceLen, text)
+            })
+        }
+        for ((domain, suffix) in TextUtils.emailDomainCandidates(before)) {
+            shown = true
+            candidateRow.addView(chip("$domain", colors.keyText, colors.key) { commitRaw(suffix) })
+        }
+        for ((suffix, _) in TextUtils.domainSuffixCandidates(before)) {
+            shown = true
+            candidateRow.addView(chip(".$suffix", colors.keyText, colors.key) { commitRaw(suffix) })
+        }
+        if (shown) return
+
         candidateRow.addView(
             textLabel(
                 if (privateField) "密码/隐私输入模式" else "键入拼音，如 nihao；空格上屏，双击空格收藏",
@@ -360,6 +401,23 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
                 colors.barBg,
             )
         )
+    }
+
+    /** 翻页（逗号句号翻页模式） */
+    private fun flipPage(delta: Int) {
+        val size = allCandidates.size
+        if (size == 0) return
+        pageStart = (pageStart + delta * 8).coerceIn(0, ((size - 1) / 8) * 8)
+        renderCandidates()
+    }
+
+    /** 替换光标前 N 个字符为 text（数字识别上屏用）。 */
+    private fun replaceTail(len: Int, text: String) {
+        val ic = currentInputConnection ?: return
+        if (len > 0) ic.deleteSurroundingText(len, 0)
+        ic.commitText(text, 1)
+        digitRun.setLength(0)
+        refreshBars()
     }
 
     private fun renderEnglish() {
@@ -573,6 +631,10 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
             }
         }
         // 二三候选键：输入中 , 选第 2 个、. 选第 3 个
+        if (pinyin.isNotEmpty() && prefs.pageKeys == 1 && (text == "," || text == ".")) {
+            flipPage(if (text == ".") 1 else -1)
+            return
+        }
         if (pinyin.isNotEmpty() && (text == "," || text == ".")) {
             val idx = if (text == ",") 1 else 2
             (match?.candidates ?: candidates).getOrNull(idx)?.let {
@@ -657,7 +719,12 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
                 }
                 return@launch
             }
-            val m = TypesakeCore.analyze(p)
+            val m = if (prefs.pageKeys == 1) {
+                val direct = TypesakeCore.analyze(p)
+                direct.copy(candidates = TypesakeCore.more(p))
+            } else {
+                TypesakeCore.analyze(p)
+            }
             withContext(Dispatchers.Main) {
                 if (pinyin.toString() == p) {
                     match = m
@@ -679,12 +746,23 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         }
     }
 
+    /** 简繁输出（设置里开"输出繁体"时生效）。 */
+    private fun applyScript(text: String): String =
+        if (prefs.script == 1 && text.any { it.code in 0x4E00..0x9FFF }) {
+            TypesakeCore.convert(text, true)
+        } else {
+            text
+        }
+
     private fun commitCandidate(word: String) {
         val ic = currentInputConnection ?: return
         val typed = if (t9Mode) t9buf.toString() else pinyin.toString()
         val corrected = match?.corrected == true || match?.remembered == true
-        ic.commitText(word, 1)
+        val out = applyScript(word)
+        ic.commitText(out, 1)
         selfEdit = true
+        pageStart = 0
+        allCandidates = emptyList()
         pinyin.setLength(0)
         t9buf.setLength(0)
         candidates = emptyList()
@@ -700,7 +778,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     /** 原样上屏（不做纠错/不学习），并清空组合状态。 */
     private fun commitRaw(text: String) {
         val ic = currentInputConnection ?: return
-        ic.commitText(text, 1)
+        ic.commitText(applyScript(text), 1)
         selfEdit = true
         pinyin.setLength(0)
         t9buf.setLength(0)
@@ -771,7 +849,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
 
     private fun insertPrediction(word: String) {
         val ic = currentInputConnection ?: return
-        ic.commitText(word, 1)
+        ic.commitText(applyScript(word), 1)
         lastCommittedChinese = word
         englishChips = TypesakeCore.englishList(word)
         predictions = TypesakeCore.predict(word)
@@ -783,6 +861,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         val ic = currentInputConnection ?: return
         if (pinyin.isNotEmpty()) commitTopCandidate()
         ic.commitText(english, 1)
+        digitRun.setLength(0)
         predictions = emptyList()
         englishChips = TypesakeCore.englishList(lastCommittedChinese)
         refreshBars()

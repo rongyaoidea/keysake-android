@@ -78,6 +78,26 @@ class TextUtilsTest {
     }
 
     @Test
+    fun mixedDigitRecognition() {
+        assertEquals("2013年10月1日" to 14, TextUtils.mixedDigitSuggestion("2013nian10yue1ri"))
+        assertEquals("3点8分" to 7, TextUtils.mixedDigitSuggestion("3dian8fen"))
+        assertEquals("12月25日" to 9, TextUtils.mixedDigitSuggestion("12yue25ri"))
+        assertNull(TextUtils.mixedDigitSuggestion("hello"))
+        assertNull(TextUtils.mixedDigitSuggestion("123"))
+        assertNull(TextUtils.mixedDigitSuggestion("2013nian10yue1xx"))
+    }
+
+    @Test
+    fun emailAndDomainSuggestions() {
+        val mail = TextUtils.emailDomainCandidates("请发到 zhang@gmail.co")
+        assertTrue(mail.isNotEmpty())
+        assertTrue(mail.any { it.first == "gmail.com" })
+        val domain = TextUtils.domainSuffixCandidates("visit baidu.")
+        assertTrue(domain.any { it.first == "com" })
+        assertTrue(TextUtils.emailDomainCandidates("no-at-sign").isEmpty())
+    }
+
+    @Test
     fun streakCountsConsecutiveDays() {
         assertEquals(0, TextUtils.streak(emptyList(), "2026-09-20"))
         assertEquals(

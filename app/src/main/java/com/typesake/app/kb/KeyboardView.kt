@@ -61,6 +61,7 @@ class KeyboardView(
     private var rowHeightPx: Int = dp(46)
     private var clipItems: List<String> = emptyList()
     private var clipPhrases: List<Pair<String, String>> = emptyList()
+    private var customSymbols: String = ""
 
     private val rows = LinearLayout(context).apply { orientation = VERTICAL }
     private val handler = Handler(Looper.getMainLooper())
@@ -84,6 +85,7 @@ class KeyboardView(
         keyHeightDp: Int,
         clipboardItems: List<String> = clipItems,
         phrases: List<Pair<String, String>> = clipPhrases,
+        customSymbols: String = "",
     ) {
         this.kind = kind
         this.layer = if (kind == KbKind.QWERTY || kind == KbKind.RAW) layer else KbLayer.LETTERS
@@ -91,6 +93,7 @@ class KeyboardView(
         this.rowHeightPx = dp(TypesakePrefs.sanitizeKeyHeight(keyHeightDp))
         this.clipItems = clipboardItems
         this.clipPhrases = phrases
+        this.customSymbols = customSymbols
         dismissPopups()
         rows.removeAllViews()
         if (colors.glass) {
@@ -160,7 +163,7 @@ class KeyboardView(
     // ---------------- 键盘构建 ----------------
 
     private fun buildKeys() {
-        val layout = KbLayouts.rowsFor(kind, layer, shifted, capsLock)
+        val layout = KbLayouts.rowsFor(kind, layer, shifted, capsLock, customSymbols)
         for (row in layout) {
             val rowView = LinearLayout(context).apply { orientation = HORIZONTAL }
             for (key in row.keys) {

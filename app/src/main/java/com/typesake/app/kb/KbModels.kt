@@ -124,7 +124,12 @@ object KbLayouts {
         return KbKey(id = "letter_$c", label = text, weight = 1f, action = KbAction.Insert(text))
     }
 
-    fun symbolRows(): List<KbRow> = listOf(
+    fun symbolRows(custom: String = ""): List<KbRow> {
+        val customKeys = custom.filter { !it.isWhitespace() }.take(10).map { ins(it.toString()) }
+        return if (customKeys.isNotEmpty()) listOf(KbRow(customKeys)) + defaultSymbolRows() else defaultSymbolRows()
+    }
+
+    private fun defaultSymbolRows(): List<KbRow> = listOf(
         KbRow("-/：;()¥&@".map { ins(it.toString()) }),
         KbRow("。，？！'\"~\\_".map { ins(if (it == '。') "." else if (it == '，') "," else it.toString()) }),
         KbRow(
@@ -217,13 +222,19 @@ object KbLayouts {
         ),
     )
 
-    fun rowsFor(kind: KbKind, layer: KbLayer, shifted: Boolean, capsLock: Boolean): List<KbRow> =
+    fun rowsFor(
+        kind: KbKind,
+        layer: KbLayer,
+        shifted: Boolean,
+        capsLock: Boolean,
+        customSymbols: String = "",
+    ): List<KbRow> =
         when (kind) {
             KbKind.NUMBER -> numberRows()
             KbKind.PHONE -> phoneRows()
-            KbKind.T9 -> if (layer == KbLayer.SYMBOLS) symbolRows() else t9Rows()
+            KbKind.T9 -> if (layer == KbLayer.SYMBOLS) symbolRows(customSymbols) else t9Rows()
             KbKind.RAW, KbKind.QWERTY -> when (layer) {
-                KbLayer.SYMBOLS -> symbolRows()
+                KbLayer.SYMBOLS -> symbolRows(customSymbols)
                 else -> lettersRows(shifted, capsLock)
             }
         }

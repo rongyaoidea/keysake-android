@@ -11,29 +11,34 @@ import java.io.File
  */
 object TypesakeAssets {
 
-    private const val DICT_ASSET = "en_dict.tsv"
-    private const val DICT_FILE = "en_dict.tsv"
+    /** (assets 名, filesDir 名) 列表 */
+    private val FILES = listOf(
+        "en_dict.tsv" to "en_dict.tsv",
+        "s2t.tsv" to "s2t.tsv",
+        "t2s.tsv" to "t2s.tsv",
+    )
     private const val KEY_DICT_VERSION = "en_dict_version"
 
-    fun dictPath(context: Context): String = File(context.filesDir, DICT_FILE).absolutePath
-
-    /** 确保词典就绪；返回是否可读（失败时引擎自动退回内建小词表）。 */
+    /** 确保随包数据（英文词典 + 简繁表）就绪；返回是否全部可读。 */
     fun ensureEnglishDict(context: Context): Boolean {
-        val target = File(context.filesDir, DICT_FILE)
         val prefs = context.getSharedPreferences("typesake_prefs", Context.MODE_PRIVATE)
         val version = BuildConfig.VERSION_CODE
-        if (target.exists() && target.length() > 0 && prefs.getInt(KEY_DICT_VERSION, -1) == version) {
-            return true
-        }
-        return try {
-            context.assets.open(DICT_ASSET).use { input ->
-                target.outputStream().use { output -> input.copyTo(output) }
+        val upToDate = prefs.getInt(KEY_DICT_VERSION, -1) == version &&
+            FILES.all { File(context.filesDir, it.second).let { f -> f.exists() && f.length() > 0 } }
+        if (upToDate) return true
+        var ok = true
+        for ((asset, name) in FILES) {
+            val target = File(context.filesDir, name)
+            try {
+                context.assets.open(asset).use { input ->
+                    target.outputStream().use { output -> input.copyTo(output) }
+                }
+            } catch (_: Exception) {
+                target.delete()
+                ok = false
             }
-            prefs.edit().putInt(KEY_DICT_VERSION, version).apply()
-            true
-        } catch (_: Exception) {
-            target.delete()
-            false
         }
+        if (ok) prefs.edit().putInt(KEY_DICT_VERSION, version).apply()
+        return ok
     }
 }

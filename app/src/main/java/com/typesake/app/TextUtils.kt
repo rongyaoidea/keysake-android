@@ -101,6 +101,70 @@ object TextUtils {
         return out
     }
 
+    /** 单位拼音 -> 中文（数字/日期混合识别用） */
+    private val DIGIT_UNITS: Map<String, String> = mapOf(
+        "nian" to "年", "yue" to "月", "ri" to "日", "hao" to "号",
+        "dian" to "点", "fen" to "分", "miao" to "秒",
+        "tian" to "天", "zhou" to "周", "sui" to "岁",
+        "ge" to "个", "kuai" to "块", "yuan" to "元", "ren" to "人",
+        "shi" to "时", "fen2" to "分",
+    )
+
+    private val MIXED_TOKEN = Regex("(\\d+)([a-z]+)?")
+
+    /**
+     * 数字/日期混合识别：`2013nian10yue1ri` → 2013年10月1日；`3dian8fen` → 3点8分。
+     * 返回 (替换文本, 需要删除的尾部长度)；识别不出返回 null。
+     */
+    fun mixedDigitSuggestion(textBefore: String): Pair<String, Int>? {
+        val tail = textBefore.takeLast(28)
+        val lower = tail.lowercase()
+        val tokens = MIXED_TOKEN.findAll(lower).toList()
+        if (tokens.isEmpty()) return null
+        // 必须从尾部连续匹配
+        val first = tokens.first()
+        if (first.range.first != lower.length - tokens.sumOf { it.value.length } + (lower.length - tail.length).coerceAtLeast(0) &&
+            !tailEndsWithTokens(lower, tokens)
+        ) {
+            return null
+        }
+        var out = StringBuilder()
+        var unitsFound = 0
+        for (m in tokens) {
+            val digits = m.groupValues[1]
+            val unit = m.groupValues[2]
+            out.append(digits)
+            if (unit.isNotEmpty()) {
+                val zh = DIGIT_UNITS[unit] ?: return null
+                out.append(zh)
+                unitsFound++
+            }
+        }
+        if (unitsFound == 0) return null
+        val consumed = tokens.joinToString("") { it.value }
+        if (!lower.endsWith(consumed)) return null
+        return out.toString() to consumed.length
+    }
+
+    private fun tailEndsWithTokens(lower: String, tokens: List<MatchResult>): Boolean =
+        lower.endsWith(tokens.joinToString("") { it.value })
+
+    /** 邮箱后缀联想：文本以 `@单词` 结尾时给出常见域名。 */
+    fun emailDomainCandidates(textBefore: String): List<Pair<String, String>> {
+        val m = Regex("@([a-z0-9]{2,})$").find(textBefore.lowercase()) ?: return emptyList()
+        val typed = m.groupValues[1]
+        return listOf("gmail.com", "outlook.com", "qq.com", "163.com", "foxmail.com")
+            .filter { it.startsWith(typed) && it != typed }
+            .take(3)
+            .map { it to it.removePrefix(typed) }
+    }
+
+    /** 网址后缀联想：文本以 `单词.` 结尾时给出常见域名后缀。 */
+    fun domainSuffixCandidates(textBefore: String): List<Pair<String, String>> {
+        val m = Regex("([a-z0-9-]{2,})\\.$").find(textBefore.lowercase()) ?: return emptyList()
+        return listOf("com", "cn", "com.cn", "org", "net", "io").take(3).map { it to it }
+    }
+
     /** 连续打卡天数（今天没输入时从昨天往前算）。 */
     fun streak(days: List<String>, today: String): Int {
         val set = days.toHashSet()

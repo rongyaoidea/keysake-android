@@ -12,6 +12,7 @@ pub mod engine;
 pub mod english;
 pub mod ffi;
 pub mod initials;
+pub mod s2t;
 pub mod shuangpin;
 pub mod store;
 pub mod t9;

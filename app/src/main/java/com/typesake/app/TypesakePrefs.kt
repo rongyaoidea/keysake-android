@@ -59,6 +59,26 @@ class TypesakePrefs(context: Context) {
         get() = sp.getBoolean(KEY_T9, false)
         set(v) = sp.edit().putBoolean(KEY_T9, v).apply()
 
+    /** 输出字形（0 简体 1 繁体） */
+    var script: Int
+        get() = sp.getInt(KEY_SCRIPT, 0)
+        set(v) = sp.edit().putInt(KEY_SCRIPT, v.coerceIn(0, 1)).apply()
+
+    /** 自定义符号页第一行（空 = 用默认） */
+    var customSymbols: String
+        get() = sp.getString(KEY_SYMBOLS, "") ?: ""
+        set(v) = sp.edit().putString(KEY_SYMBOLS, v.take(40)).apply()
+
+    /** 候选竖排 */
+    var verticalCandidates: Boolean
+        get() = sp.getBoolean(KEY_VERTICAL, false)
+        set(v) = sp.edit().putBoolean(KEY_VERTICAL, v).apply()
+
+    /** 翻页键（0 逗号句号=二三候选 1 逗号句号=翻页） */
+    var pageKeys: Int
+        get() = sp.getInt(KEY_PAGE_KEYS, 0)
+        set(v) = sp.edit().putInt(KEY_PAGE_KEYS, v.coerceIn(0, 1)).apply()
+
     /** 剪贴板历史（仅本次会话内存，不落盘） */
     var clipboardHistory: Boolean
         get() = sp.getBoolean(KEY_CLIPBOARD, true)
@@ -83,5 +103,9 @@ class TypesakePrefs(context: Context) {
         private const val KEY_CORRECTION = "correction"
         private const val KEY_SHUANGPIN = "shuangpin"
         private const val KEY_T9 = "t9_layout"
+        private const val KEY_SCRIPT = "script"
+        private const val KEY_SYMBOLS = "custom_symbols"
+        private const val KEY_VERTICAL = "vertical_candidates"
+        private const val KEY_PAGE_KEYS = "page_keys"
     }
 }
