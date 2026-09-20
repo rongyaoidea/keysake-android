@@ -147,7 +147,7 @@ private fun SetupScreen(paletteId: Int, readyTick: Int, onPaletteChange: (Int) -
                 Text(
                     "已输入 ${stats.words} 词 · 连续 " +
                         "${TextUtils.streak(stats.days, LocalDate.now().toString())} 天 · " +
-                        "收藏 ${stats.saved} · 词库 ${stats.lex} 条 · 英文词典 ${stats.endict} 条",
+                        "收藏 ${stats.saved} · 拼音词库 ${stats.lex} · 扩展词库 ${stats.biglex} · 英文词典 ${stats.endict} 条",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 val top = words.filter { it.picks > 0 }.sortedByDescending { it.picks }.take(5)

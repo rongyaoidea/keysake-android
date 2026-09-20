@@ -34,6 +34,16 @@ jobs:
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
           sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;27.2.12479018"
 
+      # 扩展词库（可选）：下载 jieba 词库并生成 lex.bin（失败不阻塞，APK 退回内置 16.5 万词库）
+      - name: Build extended lexicon (optional)
+        continue-on-error: true
+        run: |
+          curl -sSL --max-time 120 -o /tmp/jieba_dict.txt \
+            https://raw.githubusercontent.com/fxsjy/jieba/master/jieba/dict.txt
+          cargo run --release --manifest-path rust-core/Cargo.toml --bin lexgen -- \
+            --input /tmp/jieba_dict.txt --out app/src/main/assets/lex.bin
+          ls -lh app/src/main/assets/lex.bin
+
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
 

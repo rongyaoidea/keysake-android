@@ -2,7 +2,7 @@
 //!
 //! 原子写：先写 `<file>.json.tmp` 再 `rename`，避免进程被杀时留下半截 JSON。
 
-use crate::{engine, english, s2t, userdic};
+use crate::{biglex, engine, english, s2t, userdic};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -207,6 +207,8 @@ pub fn init(dir: &str) -> Result<(usize, usize), String> {
     );
     // 大词典（可选）：assets 由宿主拷到目录下的 en_dict.tsv
     let _ = english::load_dict(&Path::new(dir).join("en_dict.tsv").to_string_lossy());
+    // 大词库（可选）：CI 生成的 lex.bin
+    let _ = biglex::load(&Path::new(dir).join("lex.bin").to_string_lossy());
     engine::import_blocked(db.blocked);
     engine::set_options(
         db.settings.fuzzy,

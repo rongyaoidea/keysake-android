@@ -11,7 +11,7 @@
 //!
 //! 4–7 只在前面完全无结果时触发，避免误纠。
 
-use crate::{initials, shuangpin, t9};
+use crate::{biglex, initials, shuangpin, t9};
 use inputx_pinyin::{L0Snapshot, PinyinEngine};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -135,6 +135,13 @@ pub fn more_candidates(input: &str, limit: usize) -> Vec<String> {
         return Vec::new();
     }
     let mut out = filter_blocked(&compact, candidates_with(engine(), &compact, limit));
+    if out.len() < limit {
+        for w in biglex::exact(&compact, limit) {
+            if !out.contains(&w) {
+                out.push(w);
+            }
+        }
+    }
     if out.len() < limit {
         for w in filter_blocked(&compact, initials::candidates(&compact, limit)) {
             if !out.contains(&w) {
@@ -552,6 +559,22 @@ pub fn analyze(input: &str, limit: usize) -> Match {
     eng.dict().lookup_into(&compact, &mut exact);
 
     let mut direct = filter_blocked(&compact, candidates_with(eng, &compact, limit));
+    // 大词库补充（jieba/Rime 生成的 lex.bin）：精确优先，其次前缀
+    if direct.len() < limit {
+        for w in biglex::exact(&compact, 2) {
+            if !direct.contains(&w) {
+                direct.push(w);
+            }
+        }
+    }
+    if direct.len() < limit {
+        for w in biglex::prefix(&compact, 2) {
+            if !direct.contains(&w) {
+                direct.push(w);
+            }
+        }
+    }
+    direct.truncate(limit);
     // 个人词库（名单/通讯录导入）优先：姓名是强个人信号
     let personal = crate::store::user_words_for(&compact, 2);
     if !personal.is_empty() {
@@ -794,6 +817,11 @@ pub fn import_l0(pins: Vec<(String, String)>, pick_counts: Vec<(String, String, 
 /// 词库规模 + 简拼索引规模（设置页展示）。
 pub fn lexicon_info() -> (usize, usize) {
     (lexicon_size(), initials::size())
+}
+
+/// 大词库条数（可选层）。
+pub fn biglex_size() -> usize {
+    biglex::size()
 }
 
 #[cfg(test)]

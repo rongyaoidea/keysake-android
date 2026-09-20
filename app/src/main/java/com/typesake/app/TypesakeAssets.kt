@@ -16,6 +16,7 @@ object TypesakeAssets {
         "en_dict.tsv" to "en_dict.tsv",
         "s2t.tsv" to "s2t.tsv",
         "t2s.tsv" to "t2s.tsv",
+        "lex.bin" to "lex.bin",
     )
     private const val KEY_DICT_VERSION = "en_dict_version"
 

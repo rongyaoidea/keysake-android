@@ -8,6 +8,7 @@
 //!
 //! 全离线、零网络权限。热路径返回 `\u{1F}` 分隔串而非 JSON，避免每键解析开销。
 
+pub mod biglex;
 pub mod engine;
 pub mod english;
 pub mod ffi;
