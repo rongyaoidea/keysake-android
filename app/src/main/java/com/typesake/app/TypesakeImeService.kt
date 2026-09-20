@@ -168,7 +168,8 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         if (engineReady) {
             TypesakeCore.setOptions(prefs.fuzzy, prefs.correction, prefs.shuangpin)
         }
-        englishMode = KbLayouts.prefersEnglish(inputType)
+        val startInputType = info?.inputType ?: currentInputEditorInfo?.inputType ?: 0
+        englishMode = KbLayouts.prefersEnglish(startInputType)
         t9Mode = prefs.t9Layout && (kind == KbKind.QWERTY || kind == KbKind.RAW)
         if (t9Mode) kind = KbKind.T9
         clearComposing()
