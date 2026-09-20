@@ -1,37 +1,72 @@
-# Typesake Android（Rust 核心 + 安卓输入法壳）
+# Typesake Android（Rust 引擎 + 安卓输入法）
 
-对标 typesake.ai Mac 版的安卓输入法 MVP：打中文拼音出中文候选，同步显示英文表达，一键/双击空格收藏，学习中心复习 + 语法讲解。离线优先，无网络请求。
+打中文拼音 → 出中文候选 → 同步给出英文表达 → 收藏 → 学习中心复习 + 语法讲解。
+全离线、**零网络权限**：拼音转换、英文表达、词频学习全部在设备本地完成。
 
-## 架构（我定的 UIUX 决策）
+## 架构
 
 ```
-rust-core/   Rust 离线语言引擎（cdylib，经 JNI 供 Kotlin 调用）
-  拼音->中文候选 / 中文->英文 / 收藏JSON持久化 / 语法讲解
-app/         Kotlin 壳（必须：InputMethodService 只能是 Java/Kotlin）
-  TypesakeImeService  键盘 + 候选条 + 英文条（翡翠绿伴学条）
-  MainActivity         启用三步走 + 试打区 + 收藏
-  HubActivity          收藏列表 + 点击看语法讲解
+rust-core/                Rust 离线语言引擎（cdylib，经 JNI 供 Kotlin 调用）
+  engine.rs               拼音->候选（精确 / 整句 Viterbi / 前缀补全）+ 联想 + 词频学习(L0)
+  english.rs              中文->英文（词典贪心 + 覆盖度阈值，不吐垃圾）
+  store.rs                收藏与学习快照：原子写（tmp + rename）
+  ffi.rs                  JNI 边界，全部 catch_unwind（panic 不跨 FFI）
+app/                      Kotlin 壳（IME 只能是 Kotlin/Java）+ Compose
+  kb/KbModels.kt          纯数据布局：字母/数字/电话/符号页、emoji、长按变体、inputType 映射
+  kb/KeyboardView.kt      自绘键盘：键帽/按下态/震动/按键预览/长按变体/单手/emoji/剪贴板
+  TypesakeImeService.kt   输入逻辑：composing、候选择、联想、双击空格收藏、隐私字段保护
+  MainActivity.kt         启用指引 + 试打 + 键盘设置（主题/高度/震动/声音/预览/剪贴板）
+  HubActivity.kt          学习中心：收藏列表 + 语法讲解
 ```
 
-UX 关键决策：
-- 键盘顶部常驻英文条（emerald），★ 一键收藏，「学」直达学习中心。
-- 空格单击上屏首选，**双击空格收藏**（对齐 Mac 版双击空格保存）。
-- 无 `.so` 时 Kotlin 有最小兜底词库，App 照样能装能演示；CI 打出的包带完整 Rust `.so`。
+词库用 [`inputx-pinyin`](https://crates.io/crates/inputx-pinyin)（165k 条 FST 词典 + DP 切分 +
+Viterbi 整句组合 + bigram 联想 + L0 用户学习层）；`trigrams` 特性关闭以控制体积。
 
-## JNI 契约
+## 已实现的能力
 
-Kotlin `com.typesake.app.TypesakeCore` ↔ Rust `Java_com_typesake_app_TypesakeCore_*`：
-`initStorage / suggestEnglish / candidatesFor / englishCandidates / grammarExplain / savePhrase / listSaved / clearSaved`
+**输入体验**
+- 拼音走 composing region（可见、可退格、光标移走自动结束组合）
+- 候选：精确词 → 整句组合（`jintiankaihui` → 今天开会）→ 前缀补全（`nih` → 你好…）
+- 空格上屏首选；数字键 1-9/0 选候选；回车按输入框类型换行或执行动作
+- 上屏后展示 bigram **联想**；候选查询在后台线程 + 15ms 防抖 + LRU 缓存
+- 英文条点按直接上屏（中英混输），长按把刚上屏的中文**改写**成英文
+- 双击空格 / ★ 收藏**整句**（从光标前取当前句）
+
+**键盘**
+- 常驻数字行、符号页、emoji 面板、剪贴板历史（仅本机内存，最多 20 条）
+- 长按字母出重音变体；⇧ 双击/长按 = 大小写锁定
+- 震动、按键声音、按键预览气泡（均可关）
+- 主题跟随系统/浅色/深色；按键高度 34–62dp 可调；单手模式（左/右）
+- inputType 分支：数字键盘、电话键盘；密码/隐私字段关闭转换、学习与收藏
+
+**学习闭环入口**
+- 词频学习：连选同一候选 3 次自动置顶（L0 自动 pin），跨重启保留
+- 收藏与学习数据原子落盘；文件损坏时安全降级为空
 
 ## 本地开发
 
 ```sh
-# Rust 单测（不需要 Android SDK）
-cargo test --manifest-path rust-core/Cargo.toml
-# 完整 APK 走 GitHub Actions（本机 PRoot 无 SDK platform）
+# Rust 引擎：格式 / lint / 单测（不需要 Android SDK）
+cargo fmt --manifest-path rust-core/Cargo.toml -- --check
+cargo clippy --manifest-path rust-core/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path rust-core/Cargo.toml --release
 ```
 
-## CI
+完整 APK 走 GitHub Actions（本机 PRoot 无 Android SDK platform）。
 
-`.github/workflows/android.yml`：Rust test → cargo-ndk 编 3 ABI `.so` → Gradle assembleDebug → 上传 APK artifact。
-在 Actions 页下载 `typesake-debug-apk`，装到真机后：设置 → 系统 → 语言和输入法 → 启用 Typesake → 切换到它试打 `nihao`。
+## CI / 发布
+
+- `.github/workflows/android.yml`：`cargo fmt/clippy/test` → 3 ABI `.so` → `testDebugUnitTest` +
+  `lintDebug` + `assembleDebug` → 上传 `typesake-debug-apk` 与报告
+- `.github/workflows/release.yml`：打 tag（`v*`）触发，`assembleRelease` 并创建 GitHub Release。
+  配了这些 secrets 会签名，否则产出未签名 APK：`ANDROID_KEYSTORE_BASE64`、
+  `ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`
+
+安装：下载 APK → 安装 → 系统设置里启用「Typesake 输入法」→ 切换 → 输入框打 `nihao`。
+
+## 已知边界
+
+- 英文表达是离线词典法（约 200 条常用句 + 贪心组合），不是机器翻译；未命中时留空并可后补
+  （AI 增强：本地小模型 / 云端改写为后续工作）
+- 整句组合（Viterbi）走的是无 trigram 的 bigram 排序，长句优先级以词频为主
+- 剪贴板历史不落盘，退出即清空（隐私优先）
