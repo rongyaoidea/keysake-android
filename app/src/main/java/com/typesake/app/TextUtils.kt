@@ -121,15 +121,11 @@ object TextUtils {
         val lower = tail.lowercase()
         val tokens = MIXED_TOKEN.findAll(lower).toList()
         if (tokens.isEmpty()) return null
-        // 必须从尾部连续匹配
-        val first = tokens.first()
-        if (first.range.first != lower.length - tokens.sumOf { it.value.length } + (lower.length - tail.length).coerceAtLeast(0) &&
-            !tailEndsWithTokens(lower, tokens)
-        ) {
-            return null
-        }
-        var out = StringBuilder()
-        var unitsFound = 0
+        // 尾部必须正好由这些 token 连续组成
+        val consumed = tokens.joinToString("") { it.value }
+        if (consumed.isEmpty() || !lower.endsWith(consumed)) return null
+        val out = StringBuilder()
+        var units = 0
         for (m in tokens) {
             val digits = m.groupValues[1]
             val unit = m.groupValues[2]
@@ -137,26 +133,25 @@ object TextUtils {
             if (unit.isNotEmpty()) {
                 val zh = DIGIT_UNITS[unit] ?: return null
                 out.append(zh)
-                unitsFound++
+                units++
             }
         }
-        if (unitsFound == 0) return null
-        val consumed = tokens.joinToString("") { it.value }
-        if (!lower.endsWith(consumed)) return null
+        if (units == 0) return null
         return out.toString() to consumed.length
     }
 
-    private fun tailEndsWithTokens(lower: String, tokens: List<MatchResult>): Boolean =
-        lower.endsWith(tokens.joinToString("") { it.value })
-
     /** 邮箱后缀联想：文本以 `@单词` 结尾时给出常见域名。 */
     fun emailDomainCandidates(textBefore: String): List<Pair<String, String>> {
-        val m = Regex("@([a-z0-9]{2,})$").find(textBefore.lowercase()) ?: return emptyList()
+        val m = Regex("@([a-z0-9.]{1,})$").find(textBefore.lowercase()) ?: return emptyList()
         val typed = m.groupValues[1]
-        return listOf("gmail.com", "outlook.com", "qq.com", "163.com", "foxmail.com")
-            .filter { it.startsWith(typed) && it != typed }
-            .take(3)
-            .map { it to it.removePrefix(typed) }
+        val out = mutableListOf<Pair<String, String>>()
+        for (domain in listOf("gmail.com", "outlook.com", "qq.com", "163.com", "foxmail.com")) {
+            if (domain != typed && domain.startsWith(typed)) {
+                out += domain to domain.substring(typed.length)
+                if (out.size >= 3) break
+            }
+        }
+        return out
     }
 
     /** 网址后缀联想：文本以 `单词.` 结尾时给出常见域名后缀。 */

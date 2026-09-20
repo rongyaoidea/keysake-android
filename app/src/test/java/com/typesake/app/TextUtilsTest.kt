@@ -79,8 +79,8 @@ class TextUtilsTest {
 
     @Test
     fun mixedDigitRecognition() {
-        assertEquals("2013年10月1日" to 14, TextUtils.mixedDigitSuggestion("2013nian10yue1ri"))
-        assertEquals("3点8分" to 7, TextUtils.mixedDigitSuggestion("3dian8fen"))
+        assertEquals("2013年10月1日" to 16, TextUtils.mixedDigitSuggestion("2013nian10yue1ri"))
+        assertEquals("3点8分" to 9, TextUtils.mixedDigitSuggestion("3dian8fen"))
         assertEquals("12月25日" to 9, TextUtils.mixedDigitSuggestion("12yue25ri"))
         assertNull(TextUtils.mixedDigitSuggestion("hello"))
         assertNull(TextUtils.mixedDigitSuggestion("123"))
@@ -90,10 +90,10 @@ class TextUtilsTest {
     @Test
     fun emailAndDomainSuggestions() {
         val mail = TextUtils.emailDomainCandidates("请发到 zhang@gmail.co")
-        assertTrue(mail.isNotEmpty())
-        assertTrue(mail.any { it.first == "gmail.com" })
+        assertTrue("mail=$mail", mail.isNotEmpty())
+        assertTrue("mail=$mail", mail.any { it.first == "gmail.com" })
         val domain = TextUtils.domainSuffixCandidates("visit baidu.")
-        assertTrue(domain.any { it.first == "com" })
+        assertTrue("domain=$domain", domain.any { it.first == "com" })
         assertTrue(TextUtils.emailDomainCandidates("no-at-sign").isEmpty())
     }
 
