@@ -91,6 +91,18 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     private val clipItems = ArrayDeque<String>()
     private var clipRegistered = false
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener { captureClipboard() }
+    /** B7：设置改完立即生效（无需重新聚焦输入框） */
+    private val prefsListener =
+        android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+            if (::keyboard.isInitialized) {
+                colors = resolveColors()
+                keyboard.render(
+                    kind, layer, colors, prefs.keyHeightDp, clipItems.toList(),
+                    pairList(), prefs.customSymbols, englishMode, prefs.hideNumberRow,
+                )
+                refreshBars()
+            }
+        }
 
     private var actionPopup: PopupWindow? = null
     private var popupPinyin: String = ""
@@ -101,6 +113,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     override fun onCreate() {
         super.onCreate()
         prefs = TypesakePrefs(this)
+        prefs.registerListener(prefsListener)
         // C1：词典拷贝/JSON 载入/L0 导入全部移出主线程（首次约 50–150ms）
         io.launch {
             TypesakeAssets.ensureEnglishDict(this@TypesakeImeService)
@@ -117,6 +130,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     }
 
     override fun onDestroy() {
+        prefs.unregisterListener(prefsListener)
         unregisterClipboard()
         io.cancel()
         super.onDestroy()
@@ -129,7 +143,10 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         colors = resolveColors()
         applyGlassBlur()
         if (::keyboard.isInitialized) {
-            keyboard.render(kind, layer, colors, prefs.keyHeightDp, clipItems.toList(), pairList(), prefs.customSymbols, englishMode)
+            keyboard.render(
+                kind, layer, colors, prefs.keyHeightDp, clipItems.toList(),
+                pairList(), prefs.customSymbols, englishMode, prefs.hideNumberRow,
+            )
             refreshBars()
         }
     }
@@ -190,7 +207,10 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
             pageStart = 0
         allCandidates = emptyList()
         keyboard.setOneHand(OneHand.fromInt(prefs.oneHand))
-            keyboard.render(kind, layer, colors, prefs.keyHeightDp, clipItems.toList(), pairList(), prefs.customSymbols, englishMode)
+            keyboard.render(
+                kind, layer, colors, prefs.keyHeightDp, clipItems.toList(),
+                pairList(), prefs.customSymbols, englishMode, prefs.hideNumberRow,
+            )
             keyboard.setShift(false, false)
             refreshBars()
         }
@@ -301,7 +321,12 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
                 candidateRow.addView(textLabel("继续输入数字，或长按数字键插入原字", colors.hint, colors.barBg))
             } else {
                 for ((i, word) in list.withIndex()) {
-                    candidateRow.addView(candidateChip(if (i < 9) "${i + 1} $word" else word, word))
+                    candidateRow.addView(
+                        candidateChip(
+                            if (i < 9 && prefs.showCandidateIndex) "${i + 1} $word" else word,
+                            word,
+                        )
+                    )
                 }
             }
             return
@@ -340,7 +365,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
                 for ((i, word) in list.withIndex()) {
                     candidateRow.addView(
                         candidateChip(
-                            label = if (i < 9 && !paged) "${i + 1} $word" else word,
+                            label = if (i < 9 && !paged && prefs.showCandidateIndex) "${i + 1} $word" else word,
                             word = word,
                         )
                     )
@@ -359,8 +384,11 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
                     candidateRow.addView(chip("原样 $raw", colors.hint, colors.key) { commitRaw(raw) })
                 }
             }
-            // A4 候选翻页
-            candidateRow.addView(chip("更多 ▸", colors.hint, colors.key) { showMoreCandidates() })
+            // B5：候选多于可见数时始终给"更多"入口（提升可发现性）
+            val perPageNow = if (vertical) 4 else 8
+            if (paged || full.size > perPageNow || list.size >= perPageNow) {
+                candidateRow.addView(chip("更多 ▸", colors.hint, colors.key) { showMoreCandidates() })
+            }
             return
         }
 
@@ -928,6 +956,10 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
             ic.commitText(" ", 1)
             digitRun.setLength(0)
         }
+        if (englishMode) {
+            lastSpaceTap = 0L
+            return
+        }
         val now = SystemClock.uptimeMillis()
         if (now - lastSpaceTap < DOUBLE_TAP_MS) {
             lastSpaceTap = 0L
@@ -1083,7 +1115,10 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         prefs.englishMode = englishMode
         if (englishMode && pinyin.isNotEmpty()) commitTopCandidate()
         toast(if (englishMode) "英文输入" else "中文输入")
-        keyboard.render(kind, layer, colors, prefs.keyHeightDp, clipItems.toList(), pairList(), prefs.customSymbols, englishMode)
+        keyboard.render(
+            kind, layer, colors, prefs.keyHeightDp, clipItems.toList(),
+            pairList(), prefs.customSymbols, englishMode, prefs.hideNumberRow,
+        )
         refreshBars()
     }
 

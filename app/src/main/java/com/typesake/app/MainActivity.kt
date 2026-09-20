@@ -69,7 +69,7 @@ class MainActivity : ComponentActivity() {
                 }
                 ready++
             }
-            TypesakeTheme(paletteId) {
+            TypesakeTheme(paletteId, prefs.dynamicColor) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     SetupScreen(paletteId, ready) { paletteId = it }
                 }
@@ -101,6 +101,12 @@ private fun SetupScreen(paletteId: Int, readyTick: Int, onPaletteChange: (Int) -
     var vertical by remember { mutableStateOf(prefs.verticalCandidates) }
     var pageKeys by remember { mutableIntStateOf(prefs.pageKeys) }
     var customSymbols by remember { mutableStateOf(prefs.customSymbols) }
+    var hideNumberRow by remember { mutableStateOf(prefs.hideNumberRow) }
+    var candIndex by remember { mutableStateOf(prefs.showCandidateIndex) }
+    var hapticLevel by remember { mutableIntStateOf(prefs.hapticLevel) }
+    var oneHandScale by remember { mutableIntStateOf(prefs.oneHandScale) }
+    var dynamicColor by remember { mutableStateOf(prefs.dynamicColor) }
+    var blocked by remember(tick) { mutableStateOf(TypesakeCore.blockedList()) }
     var t9 by remember { mutableStateOf(prefs.t9Layout) }
     var trial by remember { mutableStateOf("") }
     var savedFlash by remember { mutableStateOf("") }
@@ -144,6 +150,13 @@ private fun SetupScreen(paletteId: Int, readyTick: Int, onPaletteChange: (Int) -
                         "收藏 ${stats.saved} · 词库 ${stats.lex} 条 · 英文词典 ${stats.endict} 条",
                     style = MaterialTheme.typography.bodyMedium,
                 )
+                val top = words.filter { it.picks > 0 }.sortedByDescending { it.picks }.take(5)
+                if (top.isNotEmpty()) {
+                    Text(
+                        "最常用：" + top.joinToString("、") { "${it.word}(${it.picks})" },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
                 Heatmap(stats.days)
                 Text("最近 12 周输入活跃度", style = MaterialTheme.typography.bodySmall)
                 Text("点此刷新", style = MaterialTheme.typography.bodySmall, modifier = Modifier.clickable { statTick++ })
@@ -199,6 +212,27 @@ private fun SetupScreen(paletteId: Int, readyTick: Int, onPaletteChange: (Int) -
         }
 
         Spacer(Modifier.height(4.dp))
+        if (blocked.isNotEmpty()) {
+            Text("已删词（${blocked.size}）", style = MaterialTheme.typography.titleMedium)
+            Text("删掉的候选不会再出现；这里可以恢复。", style = MaterialTheme.typography.bodySmall)
+            GlassCard {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    blocked.take(8).forEach { (py, w) ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("$py → $w", style = MaterialTheme.typography.bodyMedium)
+                            Text("恢复", style = MaterialTheme.typography.bodySmall, modifier = Modifier.clickable {
+                                TypesakeCore.restoreWord(py, w)
+                                blocked = TypesakeCore.blockedList()
+                            })
+                        }
+                    }
+                    if (blocked.size > 8) {
+                        Text("…还有 ${blocked.size - 8} 条", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+
         Text("名字词库（${names.size}）", style = MaterialTheme.typography.titleMedium)
         Text(
             "从通讯录/微信复制一串姓名（换行、逗号或空格分隔），粘贴进来即可用拼音联想。" +
@@ -344,6 +378,38 @@ private fun SetupScreen(paletteId: Int, readyTick: Int, onPaletteChange: (Int) -
             script = if (it) 1 else 0
             prefs.script = script
             TypesakeCore.setOptions(fuzzy, correction, shuangpin, script)
+        }
+        SwitchRow("隐藏数字行（上滑出数字/符号）", hideNumberRow) {
+            hideNumberRow = it
+            prefs.hideNumberRow = it
+        }
+        SwitchRow("候选显示 1/2/3 序号", candIndex) {
+            candIndex = it
+            prefs.showCandidateIndex = it
+        }
+        SwitchRow("跟随壁纸取色（Android 12+）", dynamicColor) {
+            dynamicColor = it
+            prefs.dynamicColor = it
+        }
+        Text("震动强度", style = MaterialTheme.typography.bodyMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("关" to 0, "弱" to 1, "中" to 2, "强" to 3).forEach { (label, id) ->
+                if (hapticLevel == id) {
+                    Button(onClick = {}) { Text(label) }
+                } else {
+                    OutlinedButton(onClick = { hapticLevel = id; prefs.hapticLevel = id }) { Text(label) }
+                }
+            }
+        }
+        Text("单手键盘宽度 ${oneHandScale}%", style = MaterialTheme.typography.bodyMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(75, 80, 85).forEach { pct ->
+                if (oneHandScale == pct) {
+                    Button(onClick = {}) { Text("$pct%") }
+                } else {
+                    OutlinedButton(onClick = { oneHandScale = pct; prefs.oneHandScale = pct }) { Text("$pct%") }
+                }
+            }
         }
         SwitchRow("候选竖排", vertical) {
             vertical = it

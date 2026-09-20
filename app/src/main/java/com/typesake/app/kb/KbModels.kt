@@ -9,7 +9,7 @@ package com.typesake.app.kb
  * - 数字页、电话页按 inputType 自动切换
  */
 
-enum class KbLayer { LETTERS, SYMBOLS, EMOJI, CLIPBOARD, PHRASES }
+enum class KbLayer { LETTERS, SYMBOLS, SYMBOLS2, EMOJI, CLIPBOARD, PHRASES }
 
 enum class KbKind { QWERTY, T9, NUMBER, PHONE, RAW }
 
@@ -113,9 +113,12 @@ object KbLayouts {
         shifted: Boolean,
         capsLock: Boolean,
         englishMode: Boolean = false,
+        hideNumberRow: Boolean = false,
     ): List<KbRow> {
         val rows = mutableListOf<KbRow>()
-        rows += KbRow(NUMBER_ROW.map { ins(it.toString()) })
+        if (!hideNumberRow) {
+            rows += KbRow(NUMBER_ROW.map { ins(it.toString()) })
+        }
         rows += KbRow("qwertyuiop".map { letter(it, shifted, capsLock) })
         rows += KbRow("asdfghjkl".map { letter(it, shifted, capsLock) })
         rows += KbRow(
@@ -125,16 +128,15 @@ object KbLayouts {
                 action("backspace", "⌫", 1.4f, KbAction.Backspace),
             )
         )
+        // 底行只留 6 键（主流做法）：符号 / 语言 / 中英 / 空格 / 句号 / 回车
         rows += KbRow(
             listOf(
                 action("symbols", "?123", 1.1f, KbAction.ShowLayer(KbLayer.SYMBOLS)),
-                action("cn_en", if (englishMode) "英" else "中", 1f, KbAction.ToggleEnglish),
                 action("lang", "🌐", 1f, KbAction.Language),
-                action("hide", "⌵", 1f, KbAction.HideKeyboard),
-                action("settings", "⚙", 1f, KbAction.OpenSettings),
-                action("space", "空格", 2.6f, KbAction.Space, wide = false),
+                action("cn_en", if (englishMode) "英" else "中", 1f, KbAction.ToggleEnglish),
+                action("space", "空格", 3.2f, KbAction.Space, wide = false),
                 ins(".", 1f),
-                action("enter", "⏎", 1.3f, KbAction.Enter),
+                action("enter", "⏎", 1.4f, KbAction.Enter),
             )
         )
         return rows
@@ -151,16 +153,36 @@ object KbLayouts {
         return if (customKeys.isNotEmpty()) listOf(KbRow(customKeys)) + defaultSymbolRows() else defaultSymbolRows()
     }
 
+    /** 符号第二页：数学/括号/货币/箭头（对齐主流两页符号）。 */
+    fun symbolRows2(): List<KbRow> = listOf(
+        KbRow("+-×÷=≠≈∞%‰".map { ins(it.toString()) }),
+        KbRow("()（）[]【】{}<>《》".map { ins(it.toString()) }),
+        KbRow("$€£¥₩¢°§¶©®™".map { ins(it.toString()) }),
+        KbRow("←↑→↓↔⇒⇐⇔√∑∏".map { ins(it.toString()) }),
+        KbRow(
+            listOf(
+                action("abc2", "ABC", 1.2f, KbAction.ShowLayer(KbLayer.LETTERS)),
+                action("sym1", "?123", 1.2f, KbAction.ShowLayer(KbLayer.SYMBOLS)),
+                action("backspace3", "⌫", 1.4f, KbAction.Backspace),
+                action("space3", "空格", 3f, KbAction.Space, wide = false),
+                action("enter3", "⏎", 1.4f, KbAction.Enter),
+            )
+        ),
+    )
+
     private fun defaultSymbolRows(): List<KbRow> = listOf(
         KbRow("-/：;()¥&@".map { ins(it.toString()) }),
         KbRow("。，？！'\"~\\_".map { ins(if (it == '。') "." else if (it == '，') "," else it.toString()) }),
         KbRow(
             listOf(
-                action("abc", "ABC", 1.4f, KbAction.ShowLayer(KbLayer.LETTERS)),
+                action("abc", "ABC", 1.2f, KbAction.ShowLayer(KbLayer.LETTERS)),
+                action("sym2", "=\<", 1f, KbAction.ShowLayer(KbLayer.SYMBOLS2)),
                 action("emoji2", "☺", 1f, KbAction.ShowLayer(KbLayer.EMOJI)),
                 action("clip", "📋", 1f, KbAction.ShowLayer(KbLayer.CLIPBOARD)),
                 action("phrases", "📝", 1f, KbAction.ShowLayer(KbLayer.PHRASES)),
                 action("onehand", "⇤", 1.2f, KbAction.OneHandToggle),
+                action("hide2", "⌵", 1f, KbAction.HideKeyboard),
+                action("settings2", "⚙", 1f, KbAction.OpenSettings),
                 action("cursor_left", "←", 1f, KbAction.CursorLeft),
                 action("cursor_right", "→", 1f, KbAction.CursorRight),
                 action("backspace2", "⌫", 1.4f, KbAction.Backspace),
@@ -251,14 +273,20 @@ object KbLayouts {
         capsLock: Boolean,
         customSymbols: String = "",
         englishMode: Boolean = false,
+        hideNumberRow: Boolean = false,
     ): List<KbRow> =
         when (kind) {
             KbKind.NUMBER -> numberRows()
             KbKind.PHONE -> phoneRows()
-            KbKind.T9 -> if (layer == KbLayer.SYMBOLS) symbolRows(customSymbols) else t9Rows()
+            KbKind.T9 -> if (layer == KbLayer.SYMBOLS || layer == KbLayer.SYMBOLS2) {
+                if (layer == KbLayer.SYMBOLS) symbolRows(customSymbols) else symbolRows2()
+            } else {
+                t9Rows()
+            }
             KbKind.RAW, KbKind.QWERTY -> when (layer) {
                 KbLayer.SYMBOLS -> symbolRows(customSymbols)
-                else -> lettersRows(shifted, capsLock, englishMode)
+                KbLayer.SYMBOLS2 -> symbolRows2()
+                else -> lettersRows(shifted, capsLock, englishMode, hideNumberRow)
             }
         }
 

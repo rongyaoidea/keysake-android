@@ -89,10 +89,42 @@ class TypesakePrefs(context: Context) {
         get() = sp.getBoolean(KEY_EN_SPACE, true)
         set(v) = sp.edit().putBoolean(KEY_EN_SPACE, v).apply()
 
+    /** 单手键盘档位（百分比，75/80/85） */
+    var oneHandScale: Int
+        get() = sp.getInt(KEY_ONE_SCALE, 80)
+        set(v) = sp.edit().putInt(KEY_ONE_SCALE, v.coerceIn(70, 90)).apply()
+
+    /** 隐藏数字行（靠上滑出数字/符号） */
+    var hideNumberRow: Boolean
+        get() = sp.getBoolean(KEY_HIDE_NUM, false)
+        set(v) = sp.edit().putBoolean(KEY_HIDE_NUM, v).apply()
+
+    /** 候选是否显示 1/2/3 序号 */
+    var showCandidateIndex: Boolean
+        get() = sp.getBoolean(KEY_CAND_INDEX, true)
+        set(v) = sp.edit().putBoolean(KEY_CAND_INDEX, v).apply()
+
+    /** 震动强度（0 关 1 弱 2 中 3 强） */
+    var hapticLevel: Int
+        get() = sp.getInt(KEY_HAPTIC_LEVEL, 1)
+        set(v) = sp.edit().putInt(KEY_HAPTIC_LEVEL, v.coerceIn(0, 3)).apply()
+
+    /** 跟随壁纸取色（Android 12+） */
+    var dynamicColor: Boolean
+        get() = sp.getBoolean(KEY_DYNAMIC, false)
+        set(v) = sp.edit().putBoolean(KEY_DYNAMIC, v).apply()
+
     /** 剪贴板历史（仅本次会话内存，不落盘） */
     var clipboardHistory: Boolean
         get() = sp.getBoolean(KEY_CLIPBOARD, true)
         set(v) = sp.edit().putBoolean(KEY_CLIPBOARD, v).apply()
+
+    /** 让输入法能监听设置变化（改完立即生效，无需重新聚焦输入框） */
+    fun registerListener(l: android.content.SharedPreferences.OnSharedPreferenceChangeListener) =
+        sp.registerOnSharedPreferenceChangeListener(l)
+
+    fun unregisterListener(l: android.content.SharedPreferences.OnSharedPreferenceChangeListener) =
+        sp.unregisterOnSharedPreferenceChangeListener(l)
 
     companion object {
         const val MIN_KEY_HEIGHT = 34
@@ -119,5 +151,10 @@ class TypesakePrefs(context: Context) {
         private const val KEY_PAGE_KEYS = "page_keys"
         private const val KEY_EN = "english_mode"
         private const val KEY_EN_SPACE = "english_auto_space"
+        private const val KEY_ONE_SCALE = "one_hand_scale"
+        private const val KEY_HIDE_NUM = "hide_number_row"
+        private const val KEY_CAND_INDEX = "candidate_index"
+        private const val KEY_HAPTIC_LEVEL = "haptic_level"
+        private const val KEY_DYNAMIC = "dynamic_color"
     }
 }

@@ -705,6 +705,32 @@ pub fn pin(pinyin: &str, word: &str, limit: usize) -> Vec<String> {
     candidates_with(engine(), &compact, limit)
 }
 
+/// 已删词黑名单（供设置页恢复）。
+pub fn blocked_words() -> Vec<(String, String)> {
+    export_blocked()
+}
+
+/// 恢复某个被删掉的词（从黑名单移除）。
+pub fn unblock(pinyin: &str, word: &str) -> usize {
+    let (p, w) = (normalize(pinyin), word.trim().to_string());
+    let mut n = 0;
+    if let Ok(mut b) = blocked().lock() {
+        if let Some(v) = b.get_mut(&p) {
+            let before = v.len();
+            v.retain(|x| x != &w);
+            n = before - v.len();
+            if v.is_empty() {
+                b.remove(&p);
+            }
+        }
+    }
+    if let Ok(mut c) = cache().lock() {
+        c.clear();
+    }
+    t9::clear_cache();
+    n
+}
+
 /// 删词：该拼音串下永久不再推荐这个词（并清掉它的置顶/学习记录）。
 pub fn forget(pinyin: &str, word: &str, limit: usize) -> Vec<String> {
     let compact = normalize(pinyin);

@@ -107,6 +107,8 @@ object TypesakeCore {
     @JvmStatic private external fun clearUserWords(): String
     @JvmStatic private external fun rememberMailDomain(domain: String): String
     @JvmStatic private external fun mailDomains(): String
+    @JvmStatic private external fun blockedWords(): String
+    @JvmStatic private external fun unblockWord(pinyin: String, word: String): String
     @JvmStatic private external fun bumpStats(today: String): String
     @JvmStatic private external fun statsInfo(): String
     @JvmStatic private external fun suggestEnglish(chinese: String): String
@@ -334,6 +336,23 @@ object TypesakeCore {
                 if (i <= 0) null else item.substring(0, i)
             }
         }.getOrDefault(emptyList())
+    }
+
+    /** 已删词黑名单（可恢复）。 */
+    fun blockedList(): List<Pair<String, String>> {
+        if (!available) return emptyList()
+        return runCatching {
+            splitDelim(blockedWords()).mapNotNull { item ->
+                val i = item.indexOf(RS)
+                if (i <= 0) null else item.substring(0, i) to item.substring(i + 1)
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    /** 恢复被删的词。 */
+    fun restoreWord(pinyin: String, word: String): Boolean {
+        if (!available) return false
+        return runCatching { intField(unblockWord(pinyin, word), "restored") > 0 }.getOrDefault(false)
     }
 
     /** 删除单条收藏。 */

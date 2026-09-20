@@ -7,10 +7,14 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import android.os.Build
 import androidx.compose.ui.unit.dp
 import com.typesake.app.kb.KbThemes
 
@@ -28,8 +32,14 @@ private val Sage = Color(0xFF788C5D)
  * 强调色跟随用户在设置里选的配色；底色保持奶油暖调。
  */
 @Composable
-fun TypesakeTheme(paletteId: Int, content: @Composable () -> Unit) {
+fun TypesakeTheme(paletteId: Int, dynamicColor: Boolean = false, content: @Composable () -> Unit) {
     val night = isSystemInDarkTheme()
+    val context = LocalContext.current
+    if (dynamicColor && Build.VERSION.SDK_INT >= 31) {
+        val dyn = if (night) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        MaterialTheme(colorScheme = dyn, content = content)
+        return
+    }
     val accent = if (paletteId == 0) Terracotta
     else Color(KbThemes.accentOf(KbThemes.paletteOf(paletteId), night))
     val scheme = if (night) {

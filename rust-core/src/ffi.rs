@@ -199,6 +199,40 @@ pub extern "system" fn Java_com_typesake_app_TypesakeCore_setEngineOptions<'loca
     rust_to_jstr(&mut env, &out)
 }
 
+/// 已删词列表（`拼音<RS>词`）
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_blockedWords<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> JString<'local> {
+    let out = guarded(|| {
+        let items: Vec<String> = engine::blocked_words()
+            .into_iter()
+            .map(|(p, w)| format!("{p}\u{1D}{w}"))
+            .collect();
+        join(&items)
+    });
+    rust_to_jstr(&mut env, &out)
+}
+
+/// 恢复被删的词
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_unblockWord<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    jpinyin: JString<'local>,
+    jword: JString<'local>,
+) -> JString<'local> {
+    let p = jstr_to_rust(&mut env, &jpinyin);
+    let w = jstr_to_rust(&mut env, &jword);
+    let out = guarded(|| {
+        let n = engine::unblock(&p, &w);
+        let _ = store::persist();
+        ok_json(&format!("\"restored\":{n}"))
+    });
+    rust_to_jstr(&mut env, &out)
+}
+
 /// 简繁转换：to_trad=true 输出繁体，否则输出简体。
 #[no_mangle]
 pub extern "system" fn Java_com_typesake_app_TypesakeCore_convertScript<'local>(

@@ -30,8 +30,7 @@ class KbModelsTest {
         assertTrue(labels.contains("⌫"))
         assertTrue(labels.contains("🌐"))
         assertTrue(labels.contains("中"))
-        assertTrue(labels.contains("⌵"))
-        assertTrue(labels.contains("⚙"))
+        assertTrue(labels.contains("中"))
     }
 
     @Test
@@ -161,6 +160,25 @@ class KbModelsTest {
     fun phrasesLayerIsReachable() {
         val labels = KbLayouts.symbolRows().flatMap { it.keys }.map { it.label }
         assertTrue(labels.contains("📝"))
+    }
+
+    @Test
+    fun bottomRowIsSixKeysAndNumberRowCanHide() {
+        val rows = KbLayouts.lettersRows(false, false)
+        assertEquals(5, rows.size)
+        assertEquals(6, rows.last().keys.size)
+        val hidden = KbLayouts.lettersRows(false, false, hideNumberRow = true)
+        assertEquals(4, hidden.size)
+        assertTrue(hidden.first().keys.first().label == "q")
+    }
+
+    @Test
+    fun symbolPageTwoExists() {
+        val labels = KbLayouts.symbolRows2().flatMap { it.keys }.map { it.label }
+        assertTrue(labels.contains("="))
+        assertTrue(labels.contains("$"))
+        assertTrue(labels.contains("?123"))
+        assertTrue(labels.contains("ABC"))
     }
 
     @Test

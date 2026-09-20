@@ -66,6 +66,7 @@ class KeyboardView(
     private var clipPhrases: List<Pair<String, String>> = emptyList()
     private var customSymbols: String = ""
     private var englishMode = false
+    private var hideNumberRow = false
 
     private val rows = LinearLayout(context).apply { orientation = VERTICAL }
     private val handler = Handler(Looper.getMainLooper())
@@ -78,6 +79,8 @@ class KeyboardView(
 
     init {
         orientation = VERTICAL
+        // A1/A3：左右安全边距 + 底部手势避让（最外侧键不再贴屏幕边）
+        setPadding(dp(6), 0, dp(6), dp(10))
         addView(rows, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
     }
 
@@ -92,12 +95,17 @@ class KeyboardView(
         phrases: List<Pair<String, String>> = clipPhrases,
         customSymbols: String = "",
         englishMode: Boolean = false,
+        hideNumberRow: Boolean = false,
     ) {
         this.kind = kind
         this.englishMode = englishMode
+        this.hideNumberRow = hideNumberRow
         this.layer = if (kind == KbKind.QWERTY || kind == KbKind.RAW) layer else KbLayer.LETTERS
         this.colors = colors
-        this.rowHeightPx = dp(TypesakePrefs.sanitizeKeyHeight(keyHeightDp))
+        // A4：键高上限 = 屏高 45% / 行数，防止大键高把输入区挤没
+        val maxDp = (resources.displayMetrics.heightPixels / resources.displayMetrics.density * 0.45f / 6f).toInt()
+        val wanted = TypesakePrefs.sanitizeKeyHeight(keyHeightDp)
+        this.rowHeightPx = dp(wanted.coerceAtMost(maxDp.coerceAtLeast(TypesakePrefs.MIN_KEY_HEIGHT)))
         this.clipItems = clipboardItems
         this.clipPhrases = phrases
         this.customSymbols = customSymbols
@@ -146,10 +154,13 @@ class KeyboardView(
         oneHand = mode
         val lp = layoutParams
         if (lp != null) {
+            // B3：优先用父容器实际宽度（不含系统栏），避免右侧被裁
+            val avail = (parent as? View)?.width?.takeIf { it > 0 }
+                ?: resources.displayMetrics.widthPixels
             lp.width = if (mode == OneHand.NONE) {
                 ViewGroup.LayoutParams.MATCH_PARENT
             } else {
-                (resources.displayMetrics.widthPixels * 0.8f).toInt()
+                (avail * prefs.oneHandScale / 100f).toInt()
             }
             if (lp is FrameLayout.LayoutParams) {
                 lp.gravity = when (mode) {
@@ -170,20 +181,22 @@ class KeyboardView(
     // ---------------- 键盘构建 ----------------
 
     private fun buildKeys() {
-        val layout = KbLayouts.rowsFor(kind, layer, shifted, capsLock, customSymbols, englishMode)
-        for (row in layout) {
+        val layout = KbLayouts.rowsFor(kind, layer, shifted, capsLock, customSymbols, englishMode, hideNumberRow)
+        val lastIndex = layout.lastIndex
+        layout.forEachIndexed { index, row ->
             val rowView = LinearLayout(context).apply { orientation = HORIZONTAL }
+            val h = if (index == lastIndex) rowHeightPx + dp(4) else rowHeightPx
+            // A2：第二字母行左右各缩半键，形成主流输入法的错位手感
+            val stagger = index == 2 && row.keys.size >= 7
+            if (stagger) rowView.addView(View(context), LayoutParams(0, h, 0.5f))
             for (key in row.keys) {
-                rowView.addView(
-                    KeyButton(key).apply {
-                        layoutParams = LayoutParams(0, rowHeightPx, key.weight)
-                    }
-                )
+                rowView.addView(KeyButton(key).apply { layoutParams = LayoutParams(0, h, key.weight) })
             }
+            if (stagger) rowView.addView(View(context), LayoutParams(0, h, 0.5f))
             rows.addView(
                 rowView,
                 LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
-                    topMargin = dp(4)
+                    topMargin = dp(6)
                 }
             )
         }
@@ -410,13 +423,13 @@ class KeyboardView(
                     val dx = e.x - downX
                     val dy = e.y - downY
                     when {
-                        dy < -SWIPE_THRESHOLD && dx < SWIPE_THRESHOLD_ORTHO ->
-                            swipeUp(key)
-                        key.action is KbAction.Backspace && dx < -SWIPE_THRESHOLD ->
+                        // A7：阈值按密度换算（原来是像素，高 DPI 屏上过灵敏）
+                        dy < -dp(12) && dx < dp(18) -> swipeUp(key)
+                        key.action is KbAction.Backspace && dx < -dp(12) ->
                             listener?.onDeleteWord()
-                        key.action is KbAction.Space && dx > SWIPE_THRESHOLD ->
+                        key.action is KbAction.Space && dx > dp(12) ->
                             listener?.onCursorRight()
-                        key.action is KbAction.Space && dx < -SWIPE_THRESHOLD ->
+                        key.action is KbAction.Space && dx < -dp(12) ->
                             listener?.onCursorLeft()
                         else -> perform(key)
                     }
@@ -457,7 +470,12 @@ class KeyboardView(
         e.x >= 0 && e.y >= 0 && e.x <= v.width && e.y <= v.height
 
     private fun feedback(v: View) {
-        if (prefs.haptics) v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+        when (prefs.hapticLevel) {
+            0 -> Unit
+            1 -> v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+            2 -> v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            else -> v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        }
         if (prefs.sound) v.playSoundEffect(SoundEffectConstants.CLICK)
     }
 
