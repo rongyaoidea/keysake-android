@@ -170,7 +170,11 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
             TypesakeCore.setOptions(prefs.fuzzy, prefs.correction, prefs.shuangpin)
         }
         val startInputType = info?.inputType ?: currentInputEditorInfo?.inputType ?: 0
-        englishMode = KbLayouts.prefersEnglish(startInputType)
+        englishMode = if (KbLayouts.learningDisabled(startInputType)) {
+            false
+        } else {
+            KbLayouts.prefersEnglish(startInputType) || prefs.englishMode
+        }
         t9Mode = prefs.t9Layout && (kind == KbKind.QWERTY || kind == KbKind.RAW)
         if (t9Mode) kind = KbKind.T9
         clearComposing()
@@ -420,7 +424,8 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     private fun flipPage(delta: Int) {
         val size = allCandidates.size
         if (size == 0) return
-        pageStart = (pageStart + delta * 8).coerceIn(0, ((size - 1) / 8) * 8)
+        val step = if (prefs.verticalCandidates) 4 else 8
+        pageStart = (pageStart + delta * step).coerceIn(0, ((size - 1) / step) * step)
         renderCandidates()
     }
 
@@ -688,7 +693,13 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
                 renderCandidates()
                 return
             }
-            // 智能标点
+            // 智能标点（英文模式下强制半角）
+            if (englishMode && ch in ",.;:?!") {
+                ic.commitText(ch.toString(), 1)
+                digitRun.setLength(0)
+                renderCandidates()
+                return
+            }
             if (ch in ",.;:?!") {
                 val before = ic.getTextBeforeCursor(1, 0)?.toString()?.lastOrNull()
                 ic.commitText(TextUtils.smartPunctuation(ch, before), 1)
@@ -874,6 +885,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         val ic = currentInputConnection ?: return
         ic.commitText(applyScript(word), 1)
         lastCommittedChinese = word
+        TypesakeCore.context(word)
         englishChips = TypesakeCore.englishList(word)
         predictions = TypesakeCore.predict(word)
         refreshBars()
@@ -927,12 +939,13 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
 
     override fun onEnter() {
         val ic = currentInputConnection ?: return
+        // 学商用输入法：回车 = 把输入串按英文原样上屏（不选中文候选）
         if (t9Mode && t9buf.isNotEmpty()) {
-            commitTopCandidate()
+            commitRaw(t9buf.toString())
             return
         }
         if (pinyin.isNotEmpty()) {
-            commitTopCandidate()
+            commitRaw(pinyin.toString())
             return
         }
         val info = currentInputEditorInfo

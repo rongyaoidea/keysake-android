@@ -618,6 +618,7 @@ class KeyboardView(
         dismissPreview()
         dismissAlternates()
         cancelPendingLongPress()
+        stopRepeat()
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()

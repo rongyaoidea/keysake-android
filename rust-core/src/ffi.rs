@@ -27,7 +27,13 @@ fn rust_to_jstr<'local>(env: &mut JNIEnv<'local>, s: &str) -> JString<'local> {
 }
 
 fn guarded<F: FnOnce() -> String>(f: F) -> String {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_default()
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(v) => v,
+        Err(_) => {
+            engine::note_error("JNI panic（详见 logcat）");
+            String::new()
+        }
+    }
 }
 
 fn ok_json(msg: &str) -> String {
@@ -438,7 +444,7 @@ pub extern "system" fn Java_com_typesake_app_TypesakeCore_statsInfo<'local>(
         let (fuzzy, correction, shuangpin) = engine::options();
         let days = serde_json::to_string(&st.days).unwrap_or_else(|_| "[]".into());
         ok_json(&format!(
-            "\"words\":{},\"days\":{},\"saved\":{},\"lex\":{},\"ini\":{},\"endict\":{},\"fuzzy\":{},\"correction\":{},\"shuangpin\":{},\"script\":{}",
+            "\"words\":{},\"days\":{},\"saved\":{},\"lex\":{},\"ini\":{},\"endict\":{},\"fuzzy\":{},\"correction\":{},\"shuangpin\":{},\"script\":{},\"err\":{}",
             st.words,
             days,
             store::saved_count(),
@@ -448,7 +454,8 @@ pub extern "system" fn Java_com_typesake_app_TypesakeCore_statsInfo<'local>(
             fuzzy,
             correction,
             shuangpin,
-            store::settings().script
+            store::settings().script,
+            serde_json::to_string(&engine::last_error_snapshot()).unwrap_or_else(|_| "\"\"".into())
         ))
     });
     rust_to_jstr(&mut env, &out)

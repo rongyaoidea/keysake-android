@@ -45,6 +45,7 @@ object TypesakeCore {
         val initials: Int = 0,
         val endict: Int = 0,
         val shuangpin: Int = 0,
+        val lastError: String = "",
         val fuzzy: Boolean = true,
         val correction: Boolean = true,
     )
@@ -128,6 +129,9 @@ object TypesakeCore {
 
     internal fun boolField(jsonish: String, key: String): Boolean =
         Regex("\"$key\":(true|false)").find(jsonish)?.groupValues?.get(1) == "true"
+
+    internal fun stringField(jsonish: String, key: String): String =
+        Regex("\"$key\":\"([^\"]*)\"").find(jsonish)?.groupValues?.get(1) ?: ""
 
     internal fun stringArrayField(jsonish: String, key: String): List<String> {
         val body = Regex("\"$key\":\\[(.*?)]").find(jsonish)?.groupValues?.get(1) ?: return emptyList()
@@ -359,6 +363,7 @@ object TypesakeCore {
                 initials = intField(raw, "ini"),
                 endict = intField(raw, "endict"),
                 shuangpin = intField(raw, "shuangpin"),
+                lastError = stringField(raw, "err"),
                 fuzzy = boolField(raw, "fuzzy"),
                 correction = boolField(raw, "correction"),
             )

@@ -1351,16 +1351,34 @@ pub fn english_candidates(text: &str) -> Vec<(u8, String)> {
         }
     }
 
-    // 1) 我的（翻译记忆：精确或包含）
+    // 1) 我的（翻译记忆：精确或包含）；繁体输入统一按简体匹配
+    let simp = if crate::s2t::ready(false) {
+        crate::s2t::to_simplified(t)
+    } else {
+        t.to_string()
+    };
+    let lookup_keys: Vec<&str> = if simp == t {
+        vec![t]
+    } else {
+        vec![t, simp.as_str()]
+    };
     if let Ok(m) = memory().lock() {
-        if let Some((_, en)) = m.iter().find(|(cn, _)| cn == t) {
-            push(&mut out, KIND_MINE, en.clone());
-        } else if let Some((_, en)) = m
-            .iter()
-            .filter(|(cn, _)| cn.chars().count() >= 3 && t.contains(cn.as_str()))
-            .max_by_key(|(cn, _)| cn.chars().count())
-        {
-            push(&mut out, KIND_MINE, en.clone());
+        for key in &lookup_keys {
+            if let Some((_, en)) = m.iter().find(|(cn, _)| cn == key) {
+                push(&mut out, KIND_MINE, en.clone());
+                break;
+            }
+        }
+        if out.is_empty() {
+            if let Some((_, en)) = m
+                .iter()
+                .filter(|(cn, _)| {
+                    cn.chars().count() >= 3 && lookup_keys.iter().any(|k| k.contains(cn.as_str()))
+                })
+                .max_by_key(|(cn, _)| cn.chars().count())
+            {
+                push(&mut out, KIND_MINE, en.clone());
+            }
         }
     }
 

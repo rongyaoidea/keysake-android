@@ -164,13 +164,13 @@ class KbModelsTest {
     }
 
     @Test
-    fun swipeUpMapsToDigitsAndSymbols() {
-        assertEquals("1", KbLayouts.swipeUpFor("q"))
-        assertEquals("0", KbLayouts.swipeUpFor("p"))
+    fun everyLetterSwipesUpToASymbol() {
+        // 学百度：26 键每个字母上滑都能出符号，且互不相同
+        val symbols = ('a'..'z').map { KbLayouts.swipeUpFor(it.toString()) }
+        assertTrue("每个字母都应有上滑符号", symbols.all { !it.isNullOrEmpty() })
+        assertEquals("符号应互不相同", symbols.size, symbols.toSet().size)
         assertEquals("!", KbLayouts.swipeUpFor("1"))
         assertEquals(")", KbLayouts.swipeUpFor("0"))
-        assertEquals("@", KbLayouts.swipeUpFor("a"))
-        assertNull(KbLayouts.swipeUpFor("á"))
         assertNull(KbLayouts.swipeUpFor("⇧"))
     }
 

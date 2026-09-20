@@ -67,6 +67,22 @@ pub fn options() -> (bool, bool, u8) {
 
 // ---------------- 上下文（上两个词） ----------------
 
+fn last_error() -> &'static Mutex<String> {
+    static E: OnceLock<Mutex<String>> = OnceLock::new();
+    E.get_or_init(|| Mutex::new(String::new()))
+}
+
+/// 记录最近一次引擎级错误（供设置页「引擎自检」展示）。
+pub fn note_error(msg: &str) {
+    if let Ok(mut e) = last_error().lock() {
+        *e = msg.to_string();
+    }
+}
+
+pub fn last_error_snapshot() -> String {
+    last_error().lock().map(|e| e.clone()).unwrap_or_default()
+}
+
 fn context() -> &'static Mutex<(String, String)> {
     static C: OnceLock<Mutex<(String, String)>> = OnceLock::new();
     C.get_or_init(|| Mutex::new((String::new(), String::new())))
@@ -135,10 +151,9 @@ pub fn more_candidates(input: &str, limit: usize) -> Vec<String> {
 
 /// 九键候选（数字串 -> 候选），带上下文重排。
 pub fn t9_candidates(digits: &str, limit: usize) -> Vec<String> {
-    let mut out = filter_blocked(
-        &t9::candidates(digits, limit).join(""),
-        t9::candidates(digits, limit),
-    );
+    let raw = t9::candidates(digits, limit);
+    let key: String = digits.chars().filter(|c| c.is_ascii_digit()).collect();
+    let mut out = filter_blocked(&key, raw);
     rerank_with_context(&mut out);
     out
 }
@@ -706,7 +721,7 @@ pub fn forget(pinyin: &str, word: &str, limit: usize) -> Vec<String> {
         }
     }
     if let Ok(mut l) = learned().lock() {
-        l.retain(|_, (w, _)| w != word);
+        l.retain(|k, (w, _)| !(w == word && k == &compact));
     }
     if let Ok(mut c) = cache().lock() {
         c.remove(&compact);

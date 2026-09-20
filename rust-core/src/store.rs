@@ -222,6 +222,8 @@ pub fn init(dir: &str) -> Result<(usize, usize), String> {
     s.user_words = db.user_words;
     userdic::set_domains(db.mail_domains);
     sync_memory(&s.saved);
+    // 预热简拼索引（16.5 万词条遍历一次，避免首次打字时卡一下）
+    let _ = engine::lexicon_info();
     Ok((s.saved.len(), pins))
 }
 

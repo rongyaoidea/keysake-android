@@ -333,7 +333,8 @@ private fun SetupScreen(paletteId: Int, readyTick: Int, onPaletteChange: (Int) -
                 val a = TypesakeCore.analyze("nihao")
                 val b = TypesakeCore.analyze("zhongguo")
                 val c = TypesakeCore.analyze("jintiankaihui")
-                savedFlash = "自检：引擎=${if (TypesakeCore.available) "已加载" else "未加载"}｜" +
+                savedFlash = "自检：引擎=${if (TypesakeCore.available) "已加载" else "未加载"}" +
+                    (TypesakeCore.stats().lastError.takeIf { it.isNotEmpty() }?.let { "｜错误：$it" } ?: "") + "｜" +
                     "nihao→${a.candidates.take(2)}｜zhongguo→${b.candidates.take(2)}｜" +
                     "jintian/kaihui→${c.candidates.take(2)}"
             },
