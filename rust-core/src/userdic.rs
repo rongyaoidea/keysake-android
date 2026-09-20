@@ -49,9 +49,9 @@ pub fn name_to_pinyin(name: &str) -> Option<String> {
 /// 解析粘贴文本里的姓名（换行/逗号/分号/顿号/空格分隔）。
 pub fn parse_names(text: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    for piece in text.split(|c: char| {
-        c == '\n' || c == ',' || c == '，' || c == ';' || c == '；' || c == '、' || c == '\t'
-    }) {
+    for piece in
+        text.split(|c: char| c.is_whitespace() || matches!(c, ',' | '，' | ';' | '；' | '、'))
+    {
         let name = piece.trim();
         if name.chars().count() < 2 || name.chars().count() > 6 {
             continue;
