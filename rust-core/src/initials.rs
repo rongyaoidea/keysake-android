@@ -10,8 +10,69 @@ use std::sync::OnceLock;
 
 type Table = HashMap<String, Vec<(u64, String)>>;
 
-/// 每个声母串保留的最大词数
-const PER_KEY: usize = 6;
+/// 每个声母串保留的最大词数（6 → 16：给「今天」这类高频词留位）
+const PER_KEY: usize = 16;
+
+/// 常用词白名单：建表时优先保留（否则会被词典词频更高的词挤掉，例如 jt 下的「街头」）
+const COMMON: &[&str] = &[
+    "今天",
+    "明天",
+    "昨天",
+    "现在",
+    "我们",
+    "你们",
+    "他们",
+    "她们",
+    "什么",
+    "为什么",
+    "怎么",
+    "因为",
+    "所以",
+    "但是",
+    "可以",
+    "应该",
+    "时候",
+    "这个",
+    "那个",
+    "一起",
+    "没有",
+    "知道",
+    "喜欢",
+    "需要",
+    "工作",
+    "时间",
+    "朋友",
+    "公司",
+    "电话",
+    "谢谢",
+    "你好",
+    "再见",
+    "先生",
+    "女士",
+    "老师",
+    "学生",
+    "一个",
+    "问题",
+    "办法",
+    "意思",
+    "事情",
+    "地方",
+    "东西",
+    "多少",
+    "哪里",
+    "这里",
+    "那里",
+    "出来",
+    "回来",
+    "起来",
+    "下去",
+    "一下",
+    "一点",
+];
+
+fn is_common(word: &str) -> bool {
+    COMMON.contains(&word)
+}
 /// 全表最多收录的声母串数量（防御内存）
 const MAX_KEYS: usize = 90_000;
 /// 词条最大字数
@@ -68,7 +129,13 @@ fn build() -> Initials {
     }
 
     for v in table.values_mut() {
-        v.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        // 常用词优先，其次词频，最后字典序（保证稳定）
+        v.sort_by(|a, b| {
+            is_common(&b.1)
+                .cmp(&is_common(&a.1))
+                .then_with(|| b.0.cmp(&a.0))
+                .then_with(|| a.1.cmp(&b.1))
+        });
         v.dedup_by(|a, b| a.1 == b.1);
         v.truncate(PER_KEY);
     }

@@ -159,8 +159,9 @@ pub fn compose(eng: &PinyinEngine, input: &str, limit: usize) -> Vec<String> {
                         run.push(input.as_bytes()[segs[j].0] as char);
                         j += 1;
                     }
+                    // 索引已按"常用词 > 词频"排序：取第一个字数匹配的即可
                     let mut got: Option<String> = None;
-                    for w in initials::candidates(&run, 4) {
+                    for w in initials::candidates(&run, 8) {
                         if w.chars().count() == run.chars().count() {
                             got = Some(w);
                             break;
@@ -202,7 +203,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "简拼索引里 jt 未收录「今天」（按词频只留 6 条：街头/截图/寄托/接替/接头/阶梯）"]
+    #[ignore = "简拼索引数据源受限：165k 拼音词典无「今天」词条（只有单字），需改用 lex.bin 建声母串索引"]
     fn mixed_shorthand_composes_sentence() {
         let _g = crate::test_lock();
         let out = compose(eng(), "wjtxiangqugongsi", 3);
