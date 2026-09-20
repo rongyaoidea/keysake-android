@@ -109,7 +109,8 @@ fn build() -> Initials {
             }
             // 与 lexgen 同一算法：取首选切分（音节数最少）的每个音节首字母。
             // 旧实现按元音 split，复合韵母会切错（jintian -> jnn），导致「今天」等词进不了索引。
-            let Some(first) = inputx_pinyin::segment(code).first() else {
+            let segs = inputx_pinyin::segment(code);
+            let Some(first) = segs.first() else {
                 return;
             };
             let syls = first.syllables.len();
