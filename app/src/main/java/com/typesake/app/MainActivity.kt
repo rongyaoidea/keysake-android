@@ -210,7 +210,7 @@ private fun SetupScreen(paletteId: Int, readyTick: Int, onPaletteChange: (Int) -
                 val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
                 val text = cm?.primaryClip?.takeIf { it.itemCount > 0 }
                     ?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
-                val added = TypesakeCore.importNames(text)
+                val added = TypesakeCore.addNames(text)
                 names = TypesakeCore.myNames()
                 savedFlash = if (added > 0) "已导入 $added 个姓名" else "没解析到姓名（或已存在）"
             }) { Text("从剪贴板导入名单") }

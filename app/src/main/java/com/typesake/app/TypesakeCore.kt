@@ -298,7 +298,7 @@ object TypesakeCore {
     }
 
     /** 导入姓名（换行/逗号/空格分隔）返回新增条数。 */
-    fun importNames(text: String): Int =
+    fun addNames(text: String): Int =
         if (!available) 0 else runCatching { intField(importNames(text), "added") }.getOrDefault(0)
 
     /** 个人词库（拼音 -> 姓名）。 */
@@ -316,7 +316,7 @@ object TypesakeCore {
         if (!available) 0 else runCatching { intField(clearUserWords(), "cleared") }.getOrDefault(0)
 
     /** 记住邮箱域名（点过就记住，下次优先）。 */
-    fun rememberMailDomain(domain: String) {
+    fun recallMailDomain(domain: String) {
         if (!available || domain.isEmpty()) return
         runCatching { rememberMailDomain(domain) }
     }
