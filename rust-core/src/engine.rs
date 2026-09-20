@@ -136,6 +136,13 @@ pub fn more_candidates(input: &str, limit: usize) -> Vec<String> {
     }
     let mut out = filter_blocked(&compact, candidates_with(engine(), &compact, limit));
     if out.len() < limit {
+        for w in compose_long(engine(), &compact, limit) {
+            if !out.contains(&w) {
+                out.push(w);
+            }
+        }
+    }
+    if out.len() < limit {
         for w in biglex::exact(&compact, limit) {
             if !out.contains(&w) {
                 out.push(w);
@@ -328,6 +335,94 @@ pub(crate) fn lookup_cheap(eng: &PinyinEngine, compact: &str, limit: usize) -> V
     out
 }
 
+/// 贪心切音节（用引擎的音节表，避免 segment() 在长串上枚举爆炸）。
+fn split_syllables(input: &str) -> Vec<&str> {
+    let mut out: Vec<&str> = Vec::new();
+    let mut i = 0usize;
+    let n = input.len();
+    while i < n {
+        let mut take = 0usize;
+        let max = 6.min(n - i);
+        for len in (1..=max).rev() {
+            if input.is_char_boundary(i + len)
+                && inputx_pinyin::is_valid_syllable(&input[i..i + len])
+            {
+                take = len;
+                break;
+            }
+        }
+        if take == 0 {
+            take = 1;
+        }
+        out.push(&input[i..i + take]);
+        i += take;
+    }
+    out
+}
+
+/// 长句组合：按音节切块（每块 ≤ 8 音节 / ≤ 20 字母），逐块 Viterbi 再拼接。
+/// 这是主流输入法处理"超长拼音串"的方式（引擎单次组合上限 30 字母）。
+pub fn compose_long(eng: &PinyinEngine, compact: &str, limit: usize) -> Vec<String> {
+    if compact.len() <= 24 || limit == 0 {
+        return Vec::new();
+    }
+    let syls = split_syllables(compact);
+    if syls.is_empty() {
+        return Vec::new();
+    }
+    let mut chunks: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut cur_syls = 0usize;
+    for s in &syls {
+        if !cur.is_empty() && (cur.len() + s.len() > 20 || cur_syls >= 8) {
+            chunks.push(cur.clone());
+            cur.clear();
+            cur_syls = 0;
+        }
+        cur.push_str(s);
+        cur_syls += 1;
+    }
+    if !cur.is_empty() {
+        chunks.push(cur);
+    }
+    let dict = eng.dict();
+    let mut parts: Vec<String> = Vec::with_capacity(chunks.len());
+    for c in &chunks {
+        let pick = if c.len() >= 4 {
+            dict.top_k_compositions(c, 1)
+                .first()
+                .map(|(_, w)| w.clone())
+        } else {
+            lookup_cheap(eng, c, 1).first().cloned()
+        };
+        match pick {
+            Some(w) if !w.is_empty() => parts.push(w),
+            _ => return Vec::new(), // 任一块组合失败：宁可返回空，也不吐半句
+        }
+    }
+    let joined = parts.concat();
+    if joined.is_empty() {
+        return Vec::new();
+    }
+    // 整句候选 + 最后一块的备选（方便局部改错）
+    let mut out = vec![joined];
+    if chunks.len() >= 2 {
+        if let Some(last) = chunks.last() {
+            for (_s, w) in dict.top_k_compositions(last, 3) {
+                let head: String = parts[..parts.len() - 1].concat();
+                let cand = format!("{head}{w}");
+                if !out.contains(&cand) {
+                    out.push(cand);
+                    if out.len() >= limit {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 /// 完整候选（精确 -> 整句 -> 前缀），带缓存。
 pub fn candidates_with(eng: &PinyinEngine, input: &str, limit: usize) -> Vec<String> {
     let compact = normalize(input);
@@ -349,6 +444,13 @@ pub fn candidates_with(eng: &PinyinEngine, input: &str, limit: usize) -> Vec<Str
             if out.len() >= limit {
                 break;
             }
+        }
+    }
+
+    // 长句（>24 字母）：按音节切块组合（引擎单次上限 30 字母）
+    if out.len() < limit {
+        for w in compose_long(eng, &compact, limit) {
+            push_unique(&mut out, w, limit);
         }
     }
 
@@ -931,6 +1033,22 @@ mod tests {
         let m = analyze("nh", 8);
         assert!(!m.corrected);
         assert!(m.candidates.contains(&"你好".to_string()), "got {m:?}");
+    }
+
+    #[test]
+    fn long_sentence_still_has_candidates() {
+        let _g = gated();
+        // 36 字母 > 引擎 top_k_compositions 的 MAX_LEN(30)：必须靠分块组合出候选
+        let long = "jintianxiawuwomenyiqiqukanyidianying";
+        assert!(long.len() > 30, "测试用例必须超过引擎上限");
+        let m = analyze(long, 8);
+        assert!(!m.candidates.is_empty(), "长句不应无候选: {m:?}");
+        assert!(
+            m.candidates.iter().any(|w| w.contains("今天")),
+            "长句首候选应含常见词: {m:?}"
+        );
+        // 分块拼接不应吐半句
+        assert!(m.candidates.iter().all(|w| w.chars().count() >= 4), "{m:?}");
     }
 
     #[test]
