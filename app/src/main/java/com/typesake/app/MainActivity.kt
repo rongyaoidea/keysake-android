@@ -96,7 +96,6 @@ private fun SetupScreen(paletteId: Int, readyTick: Int, onPaletteChange: (Int) -
     var tick by remember { mutableIntStateOf(readyTick) }
     var shuangpin by remember { mutableIntStateOf(prefs.shuangpin) }
     var words by remember(tick) { mutableStateOf(TypesakeCore.myWords()) }
-    val context = LocalContext.current
     var t9 by remember { mutableStateOf(prefs.t9Layout) }
     var trial by remember { mutableStateOf("") }
     var savedFlash by remember { mutableStateOf("") }
