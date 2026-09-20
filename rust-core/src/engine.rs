@@ -874,12 +874,22 @@ mod tests {
         set_context("我");
         set_context("喜欢");
         let c = analyze("he", 8).candidates;
-        assert!(!c.is_empty());
-        assert_eq!(most_likely(c), true, "候选非空即可（重排只调整顺序）");
-    }
-
-    fn most_likely(c: Vec<String>) -> bool {
-        c.iter().all(|w| !w.is_empty())
+        assert!(!c.is_empty(), "候选不应为空");
+        // 不变式：前 5 个里 bigram 得分最高者必须排在首位（重排实现只动前 5）
+        let n = c.len().min(5);
+        if n >= 2 {
+            let dict = engine().dict();
+            let best = c[..n]
+                .iter()
+                .max_by(|a, b| {
+                    dict.bigram_boost(Some("喜欢"), b)
+                        .partial_cmp(&dict.bigram_boost(Some("喜欢"), a))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .cloned()
+                .unwrap();
+            assert_eq!(c[0], best, "bigram 最优候选应在首位: {c:?}");
+        }
     }
 
     #[test]

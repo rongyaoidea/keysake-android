@@ -241,14 +241,14 @@ object TypesakeCore {
         else runCatching { splitDelim(t9Candidates(digits)) }.getOrDefault(emptyList())
 
     /** 编辑收藏英文（反哺翻译记忆）。 */
-    fun updateSaved(chinese: String, oldEnglish: String, newEnglish: String): Boolean {
+    fun editSaved(chinese: String, oldEnglish: String, newEnglish: String): Boolean {
         if (!available) return MemStore.update(chinese, oldEnglish, newEnglish)
         return runCatching { intField(updateSaved(chinese, oldEnglish, newEnglish), "updated") == 1 }
             .getOrDefault(false)
     }
 
     /** 删除单条收藏。 */
-    fun deleteSaved(chinese: String, english: String): Boolean {
+    fun removeSaved(chinese: String, english: String): Boolean {
         if (!available) return MemStore.delete(chinese, english)
         return runCatching { intField(deleteSaved(chinese, english), "deleted") == 1 }
             .getOrDefault(false)
