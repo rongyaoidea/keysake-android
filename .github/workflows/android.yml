@@ -119,11 +119,30 @@ jobs:
 
       - name: Check engine presence
         run: |
-          if [ -f app/src/main/jniLibs/arm64-v8a/libtypesake_core.so ]; then
-            echo "engine: present"
-          else
-            echo "::warning title=Rust engine missing::libtypesake_core.so 未生成，APK 将运行在 Kotlin 兜底模式"
+          missing=0
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            if [ -f "app/src/main/jniLibs/$abi/libtypesake_core.so" ]; then
+              echo "engine: $abi present"
+            else
+              echo "engine: $abi MISSING"
+              missing=1
+            fi
+          done
+          if [ "$missing" = "1" ]; then
+            echo "::warning title=Rust engine incomplete::有 ABI 缺 libtypesake_core.so，真机可能显示「引擎未加载」"
           fi
+
+      - name: Assert APK contains all ABIs
+        run: |
+          APK=$(ls app/build/outputs/apk/debug/*.apk | head -n 1)
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            if unzip -l "$APK" | grep -q "lib/$abi/libtypesake_core.so"; then
+              echo "apk: $abi ok"
+            else
+              echo "::error title=APK missing ABI::$abi 未打进 APK"
+              exit 1
+            fi
+          done
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
