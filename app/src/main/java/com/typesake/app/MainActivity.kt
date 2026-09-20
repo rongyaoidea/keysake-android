@@ -3,6 +3,7 @@ package com.typesake.app
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
+import androidx.compose.foundation.clickable
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -65,6 +66,10 @@ private fun SetupScreen() {
     var sound by remember { mutableStateOf(prefs.sound) }
     var preview by remember { mutableStateOf(prefs.keyPreview) }
     var clipboard by remember { mutableStateOf(prefs.clipboardHistory) }
+    var palette by remember { mutableIntStateOf(prefs.palette) }
+    var fuzzy by remember { mutableStateOf(prefs.fuzzy) }
+    var correction by remember { mutableStateOf(prefs.correction) }
+    var statTick by remember { mutableIntStateOf(0) }
     var trial by remember { mutableStateOf("") }
     var savedFlash by remember { mutableStateOf("") }
 
@@ -85,6 +90,18 @@ private fun SetupScreen() {
             style = MaterialTheme.typography.bodySmall,
         )
 
+        val stats = remember(statTick) { TypesakeCore.stats() }
+        Card {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("学习数据", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "已输入 ${stats.words} 词 · 连续 ${TextUtils.streak(stats.days, java.time.LocalDate.now().toString())} 天 · " +
+                        "收藏 ${stats.saved} · 词库 ${stats.lex} 条（简拼索引 ${stats.initials}）",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text("点此刷新", style = MaterialTheme.typography.bodySmall, modifier = Modifier.clickable { statTick++ })
+            }
+        }
         Card {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("启用三步走", style = MaterialTheme.typography.titleMedium)
@@ -149,6 +166,29 @@ private fun SetupScreen() {
                     }) { Text(label) }
                 }
             }
+        }
+        Text("配色", style = MaterialTheme.typography.bodyMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("翠绿" to 0, "暖阳" to 1, "玫瑰" to 2, "海洋" to 3).forEach { (label, id) ->
+                if (palette == id) {
+                    Button(onClick = {}) { Text(label) }
+                } else {
+                    OutlinedButton(onClick = {
+                        palette = id
+                        prefs.palette = id
+                    }) { Text(label) }
+                }
+            }
+        }
+        SwitchRow("模糊音（z/zh、n/l、an/ang…）", fuzzy) {
+            fuzzy = it
+            prefs.fuzzy = it
+            TypesakeCore.setOptions(it, correction)
+        }
+        SwitchRow("击键纠错（邻键/漏键/多键/换位）", correction) {
+            correction = it
+            prefs.correction = it
+            TypesakeCore.setOptions(fuzzy, it)
         }
         Text("按键高度 ${keyHeight.toInt()} dp", style = MaterialTheme.typography.bodyMedium)
         Slider(

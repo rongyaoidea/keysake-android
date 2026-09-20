@@ -34,6 +34,21 @@ class TypesakePrefs(context: Context) {
         get() = sp.getInt(KEY_ONE_HAND, 0)
         set(v) = sp.edit().putInt(KEY_ONE_HAND, v.coerceIn(0, 2)).apply()
 
+    /** 配色（0 翠绿 1 暖阳 2 玫瑰 3 海洋） */
+    var palette: Int
+        get() = sp.getInt(KEY_PALETTE, 0)
+        set(v) = sp.edit().putInt(KEY_PALETTE, v.coerceIn(0, 3)).apply()
+
+    /** 模糊音（z/zh、n/l、an/ang…） */
+    var fuzzy: Boolean
+        get() = sp.getBoolean(KEY_FUZZY, true)
+        set(v) = sp.edit().putBoolean(KEY_FUZZY, v).apply()
+
+    /** 击键纠错（邻键/漏键/多键/换位） */
+    var correction: Boolean
+        get() = sp.getBoolean(KEY_CORRECTION, true)
+        set(v) = sp.edit().putBoolean(KEY_CORRECTION, v).apply()
+
     /** 剪贴板历史（仅本次会话内存，不落盘） */
     var clipboardHistory: Boolean
         get() = sp.getBoolean(KEY_CLIPBOARD, true)
@@ -53,5 +68,8 @@ class TypesakePrefs(context: Context) {
         private const val KEY_PREVIEW = "key_preview"
         private const val KEY_ONE_HAND = "one_hand"
         private const val KEY_CLIPBOARD = "clipboard_history"
+        private const val KEY_PALETTE = "palette"
+        private const val KEY_FUZZY = "fuzzy"
+        private const val KEY_CORRECTION = "correction"
     }
 }

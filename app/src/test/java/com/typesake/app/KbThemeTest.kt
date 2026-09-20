@@ -1,8 +1,10 @@
 package com.typesake.app
 
+import com.typesake.app.kb.KbPalette
 import com.typesake.app.kb.KbThemes
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -10,14 +12,22 @@ class KbThemeTest {
 
     @Test
     fun followsSystemWhenModeIsSystem() {
-        assertEquals(KbThemes.dark, KbThemes.resolve(KbThemes.THEME_SYSTEM, night = true))
-        assertEquals(KbThemes.light, KbThemes.resolve(KbThemes.THEME_SYSTEM, night = false))
+        assertEquals(
+            KbThemes.resolve(KbPalette.GREEN, KbThemes.THEME_DARK, false),
+            KbThemes.resolve(KbPalette.GREEN, KbThemes.THEME_SYSTEM, true),
+        )
+        assertEquals(
+            KbThemes.resolve(KbPalette.GREEN, KbThemes.THEME_LIGHT, true),
+            KbThemes.resolve(KbPalette.GREEN, KbThemes.THEME_SYSTEM, false),
+        )
     }
 
     @Test
     fun explicitModeOverridesSystem() {
-        assertEquals(KbThemes.light, KbThemes.resolve(KbThemes.THEME_LIGHT, night = true))
-        assertEquals(KbThemes.dark, KbThemes.resolve(KbThemes.THEME_DARK, night = false))
+        assertNotEquals(
+            KbThemes.resolve(KbPalette.ROSE, KbThemes.THEME_LIGHT, true),
+            KbThemes.resolve(KbPalette.ROSE, KbThemes.THEME_DARK, true),
+        )
     }
 
     @Test
@@ -28,9 +38,18 @@ class KbThemeTest {
     }
 
     @Test
-    fun themesAreVisuallyDistinct() {
-        assertTrue(KbThemes.light.key != KbThemes.dark.key)
-        assertTrue(KbThemes.light.barBg != KbThemes.dark.barBg)
-        assertTrue(KbThemes.light.keyText != KbThemes.dark.keyText)
+    fun palettesAreVisuallyDistinct() {
+        val accents = KbPalette.entries.map { KbThemes.accentOf(it, night = false) }
+        assertEquals(accents.size, accents.toSet().size)
+        val darkAccents = KbPalette.entries.map { KbThemes.accentOf(it, night = true) }
+        assertEquals(darkAccents.size, darkAccents.toSet().size)
+    }
+
+    @Test
+    fun paletteLookupIsBoundsSafe() {
+        assertEquals(KbPalette.GREEN, KbThemes.paletteOf(0))
+        assertEquals(KbPalette.OCEAN, KbThemes.paletteOf(3))
+        assertEquals(KbPalette.GREEN, KbThemes.paletteOf(99))
+        assertEquals(KbPalette.GREEN, KbThemes.paletteOf(-1))
     }
 }

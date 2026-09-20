@@ -17,6 +17,7 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
+import android.widget.PopupWindow
 import android.widget.TextView
 import android.widget.Toast
 import com.typesake.app.kb.KbColors
@@ -26,6 +27,7 @@ import com.typesake.app.kb.KbLayouts
 import com.typesake.app.kb.KbThemes
 import com.typesake.app.kb.KeyboardView
 import com.typesake.app.kb.OneHand
+import java.time.LocalDate
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -38,31 +40,34 @@ import kotlinx.coroutines.withContext
 /**
  * Typesake 输入法服务。
  *
- * 体验要点（对齐 Mac 版，移动端适配）：
- * - 拼音走 composing region（可见、可退格、系统行为正确）
- * - 顶部英文条：点英文直接上屏（中英混输），长按英文 = 替换刚上屏的中文
- * - 上屏后展示"联想"（bigram 预测）；空格上屏首选，双击空格收藏整句
- * - 候选查询在后台线程 + 15ms 防抖 + LRU 缓存，主线程只渲染
- * - 密码等隐私字段关闭拼音转换/学习/收藏，只做原始输入
+ * 布局（对齐主流中文输入法）：**中文候选在上，英文伴学在下**，再往下是键盘。
+ * 体验要点：
+ * - 拼音走 composing region；候选来自 Rust 引擎（精确/整句/前缀/简拼/模糊音/击键纠错）
+ * - 纠错命中时标签显示 `输入→纠正` 并在候选上打「纠」标；用户选中后记住该错拼
+ * - 长按候选：置顶 / 删词；长按 ⌫ 或左滑 ⌫：删词块；空格左右滑：移光标
+ * - 英文条点按直接上屏（中英混输），长按把刚上屏的中文改写成英文
  */
 class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
 
     private lateinit var prefs: TypesakePrefs
     private lateinit var root: FrameLayout
     private lateinit var keyboard: KeyboardView
-    private lateinit var englishRow: LinearLayout
     private lateinit var candidateRow: LinearLayout
-    private lateinit var englishScroll: HorizontalScrollView
+    private lateinit var englishRow: LinearLayout
     private lateinit var candidateScroll: HorizontalScrollView
+    private lateinit var englishScroll: HorizontalScrollView
 
     private val io = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var lookupJob: Job? = null
 
     private val pinyin = StringBuilder()
+    private val digitRun = StringBuilder()
+    private var match: TypesakeCore.Match? = null
     private var candidates: List<String> = emptyList()
     private var predictions: List<String> = emptyList()
     private var englishChips: List<String> = emptyList()
     private var lastCommittedChinese: String = ""
+    private var phrases: List<Triple<String, String, Long>> = emptyList()
 
     private var shifted = false
     private var capsLock = false
@@ -73,11 +78,15 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     private var kind = KbKind.QWERTY
     private var layer = KbLayer.LETTERS
     private var privateField = false
-    private var colors: KbColors = KbThemes.light
+    private var colors: KbColors = KbThemes.resolve(0, 0, false)
 
     private val clipItems = ArrayDeque<String>()
     private var clipRegistered = false
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener { captureClipboard() }
+
+    private var actionPopup: PopupWindow? = null
+    private var popupPinyin: String = ""
+    private var popupWord: String = ""
 
     // ---------------- 生命周期 ----------------
 
@@ -99,7 +108,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         super.onConfigurationChanged(newConfig)
         colors = resolveColors()
         if (::keyboard.isInitialized) {
-            keyboard.render(kind, layer, colors, prefs.keyHeightDp, clipItems.toList())
+            keyboard.render(kind, layer, colors, prefs.keyHeightDp, clipItems.toList(), pairList())
             refreshBars()
         }
     }
@@ -115,15 +124,18 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         TypesakeCore.init(filesDir.absolutePath)
+        TypesakeCore.setOptions(prefs.fuzzy, prefs.correction)
         clearComposing()
+        digitRun.setLength(0)
         predictions = emptyList()
         englishChips = emptyList()
         shifted = false
         capsLock = false
         colors = resolveColors()
+        phrases = loadPhrases()
         if (::keyboard.isInitialized) {
             keyboard.setOneHand(OneHand.fromInt(prefs.oneHand))
-            keyboard.render(kind, layer, colors, prefs.keyHeightDp, clipItems.toList())
+            keyboard.render(kind, layer, colors, prefs.keyHeightDp, clipItems.toList(), pairList())
             keyboard.setShift(false, false)
             refreshBars()
         }
@@ -133,6 +145,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     override fun onFinishInputView(finishingInput: Boolean) {
         unregisterClipboard()
         lookupJob?.cancel()
+        dismissActionPopup()
         super.onFinishInputView(finishingInput)
     }
 
@@ -146,17 +159,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         root = FrameLayout(this)
         val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
-        englishScroll = HorizontalScrollView(this)
-        englishRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        englishScroll.addView(englishRow)
-        column.addView(
-            englishScroll,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            )
-        )
-
+        // 中文候选在上
         candidateScroll = HorizontalScrollView(this)
         candidateRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         candidateScroll.addView(candidateRow)
@@ -168,7 +171,18 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
             )
         )
 
-        // 键盘放在 FrameLayout 里，单手模式才能靠 gravity 左右贴边
+        // 英文伴学在下
+        englishScroll = HorizontalScrollView(this)
+        englishRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        englishScroll.addView(englishRow)
+        column.addView(
+            englishScroll,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            )
+        )
+
         val keyboardHost = FrameLayout(this)
         keyboard = KeyboardView(this, prefs, this).apply {
             layoutParams = FrameLayout.LayoutParams(
@@ -187,59 +201,32 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
 
         root.addView(column)
         colors = resolveColors()
-        renderEnglish()
         renderCandidates()
+        renderEnglish()
         return root
     }
 
     // ---------------- 状态与渲染 ----------------
 
     private fun resolveColors(): KbColors =
-        KbThemes.resolve(prefs.themeMode, KbThemes.isNight(resources.configuration.uiMode))
+        KbThemes.resolve(prefs.palette, prefs.themeMode, KbThemes.isNight(resources.configuration.uiMode))
+
+    private fun pairList(): List<Pair<String, String>> =
+        phrases.map { it.first to it.second }
+
+    private fun loadPhrases(): List<Triple<String, String, Long>> =
+        TypesakeCore.list().map { Triple(it.chinese, it.english, it.saved_at) }
 
     private fun clearComposing() {
         pinyin.setLength(0)
         candidates = emptyList()
+        match = null
         lastCommittedChinese = ""
     }
 
     private fun refreshBars() {
-        renderEnglish()
         renderCandidates()
-    }
-
-    private fun renderEnglish() {
-        if (!::englishRow.isInitialized) return
-        englishRow.removeAllViews()
-        englishScroll.setBackgroundColor(colors.barBg)
-
-        if (englishChips.isEmpty()) {
-            englishRow.addView(
-                chip(
-                    label = if (privateField) "隐私输入：不转换、不学习、不收藏" else "英文表达显示在这里",
-                    textColor = colors.hint,
-                    bg = colors.barBg,
-                )
-            )
-        } else {
-            for (text in englishChips) {
-                englishRow.addView(
-                    chip(
-                        label = text,
-                        textColor = colors.barText,
-                        bg = colors.key,
-                        onClick = { insertEnglish(text) },
-                        onLongClick = { replaceLastChineseWith(text) },
-                    )
-                )
-            }
-        }
-        if (!privateField) {
-            englishRow.addView(
-                chip("★", colors.accentText, colors.accent, onClick = { saveCurrentSentence() })
-            )
-        }
-        englishRow.addView(chip("学", colors.accentText, colors.accent, onClick = { onOpenHub() }))
+        renderEnglish()
     }
 
     private fun renderCandidates() {
@@ -247,18 +234,27 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         candidateRow.removeAllViews()
         candidateScroll.setBackgroundColor(colors.barBg)
 
+        // 1) 拼音输入中
         if (pinyin.isNotEmpty()) {
-            candidateRow.addView(textLabel(pinyin.toString(), colors.accent, colors.barBg))
-            if (candidates.isEmpty()) {
+            val m = match
+            val label = when {
+                m != null && m.remembered -> "${pinyin}⇒${m.matched}"
+                m != null && m.corrected -> "$pinyin→${m.matched}"
+                else -> pinyin.toString()
+            }
+            candidateRow.addView(textLabel(label, colors.accent, colors.barBg))
+            if (m != null && (m.corrected || m.remembered)) {
+                candidateRow.addView(chip(if (m.remembered) "已记住" else "纠", colors.accentText, colors.accent))
+            }
+            val list = m?.candidates ?: candidates
+            if (list.isEmpty()) {
                 candidateRow.addView(textLabel("空格直接上屏", colors.hint, colors.barBg))
             } else {
-                for ((i, word) in candidates.withIndex()) {
+                for ((i, word) in list.withIndex()) {
                     candidateRow.addView(
-                        chip(
+                        candidateChip(
                             label = if (i < 9) "${i + 1} $word" else word,
-                            textColor = colors.keyText,
-                            bg = colors.key,
-                            onClick = { commitCandidate(word) },
+                            word = word,
                         )
                     )
                 }
@@ -266,16 +262,26 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
             return
         }
 
+        // 2) 数字智能候选（手机号/日期/时间）
+        if (digitRun.isNotEmpty()) {
+            val decorated = TextUtils.digitCandidates(digitRun.toString())
+            if (decorated.isNotEmpty()) {
+                candidateRow.addView(textLabel("数字", colors.hint, colors.barBg))
+                for (text in decorated) {
+                    candidateRow.addView(
+                        chip(text, colors.keyText, colors.key, onClick = { commitDigitDecoration(text) })
+                    )
+                }
+                return
+            }
+        }
+
+        // 3) 联想
         if (predictions.isNotEmpty()) {
             candidateRow.addView(textLabel("联想", colors.hint, colors.barBg))
             for (word in predictions) {
                 candidateRow.addView(
-                    chip(
-                        label = word,
-                        textColor = colors.barText,
-                        bg = colors.key,
-                        onClick = { insertPrediction(word) },
-                    )
+                    chip(word, colors.barText, colors.key, onClick = { insertPrediction(word) })
                 )
             }
             return
@@ -290,6 +296,57 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         )
     }
 
+    private fun renderEnglish() {
+        if (!::englishRow.isInitialized) return
+        englishRow.removeAllViews()
+        englishScroll.setBackgroundColor(colors.barBg)
+
+        if (englishChips.isEmpty()) {
+            englishRow.addView(
+                chip(
+                    if (privateField) "隐私输入：不转换、不学习、不收藏" else "英文表达显示在这里",
+                    colors.hint,
+                    colors.barBg,
+                )
+            )
+        } else {
+            for (text in englishChips) {
+                englishRow.addView(
+                    chip(
+                        text,
+                        colors.barText,
+                        colors.key,
+                        onClick = { insertEnglish(text) },
+                        onLongClick = { replaceLastChineseWith(text) },
+                    )
+                )
+            }
+        }
+        if (!privateField) {
+            englishRow.addView(chip("★", colors.accentText, colors.accent, onClick = { saveCurrentSentence() }))
+        }
+        englishRow.addView(chip("学", colors.accentText, colors.accent, onClick = { onOpenHub() }))
+    }
+
+    /** 中文候选：字号更大（主视觉），支持长按置顶/删词。 */
+    private fun candidateChip(label: String, word: String): TextView = TextView(this).apply {
+        text = label
+        setTextColor(colors.keyText)
+        textSize = 17f
+        maxLines = 1
+        gravity = Gravity.CENTER
+        setPadding(dp(14), dp(9), dp(14), dp(9))
+        background = GradientDrawable().apply {
+            setColor(colors.key)
+            cornerRadius = dp(9).toFloat()
+        }
+        isClickable = true
+        setOnClickListener { commitCandidate(word) }
+        setOnLongClickListener { showCandidateActions(word); true }
+        layoutParams = chipParams()
+    }
+
+    /** 英文/操作条：字号更小（次要信息）。 */
     private fun chip(
         label: String,
         textColor: Int,
@@ -299,10 +356,10 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     ): TextView = TextView(this).apply {
         text = label
         setTextColor(textColor)
-        textSize = 14f
+        textSize = 13f
         maxLines = 1
         gravity = Gravity.CENTER
-        setPadding(dp(12), dp(8), dp(12), dp(8))
+        setPadding(dp(10), dp(6), dp(10), dp(6))
         background = GradientDrawable().apply {
             setColor(bg)
             cornerRadius = dp(8).toFloat()
@@ -317,14 +374,16 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
                 true
             }
         }
-        layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-        ).apply {
-            marginStart = dp(6)
-            topMargin = dp(4)
-            bottomMargin = dp(4)
-        }
+        layoutParams = chipParams()
+    }
+
+    private fun chipParams(): LinearLayout.LayoutParams = LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.WRAP_CONTENT,
+        ViewGroup.LayoutParams.WRAP_CONTENT,
+    ).apply {
+        marginStart = dp(6)
+        topMargin = dp(4)
+        bottomMargin = dp(4)
     }
 
     private fun textLabel(label: String, color: Int, bg: Int): TextView = TextView(this).apply {
@@ -336,6 +395,52 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         setBackgroundColor(bg)
     }
 
+    // ---------------- 候选操作（长按） ----------------
+
+    private fun showCandidateActions(word: String) {
+        dismissActionPopup()
+        popupPinyin = pinyin.toString()
+        popupWord = word
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(colors.bg)
+            setPadding(dp(6), dp(6), dp(6), dp(6))
+        }
+        row.addView(
+            chip("置顶", colors.accentText, colors.accent, onClick = {
+                TypesakeCore.pin(popupPinyin, popupWord)
+                dismissActionPopup()
+                candidates = TypesakeCore.cached(popupPinyin) ?: candidates
+                match = match?.copy(candidates = candidates)
+                renderCandidates()
+                toast("已置顶：$popupWord")
+            })
+        )
+        row.addView(
+            chip("删词", colors.keyText, colors.key, onClick = {
+                val updated = TypesakeCore.forget(popupPinyin, popupWord)
+                dismissActionPopup()
+                candidates = updated
+                match = match?.copy(candidates = updated)
+                renderCandidates()
+                toast("已删除：$popupWord")
+            })
+        )
+        val popup = PopupWindow(row, ViewGroup.LayoutParams.WRAP_CONTENT, dp(44), true).apply {
+            isOutsideTouchable = true
+        }
+        val anchor = candidateRow
+        val loc = IntArray(2)
+        anchor.getLocationInWindow(loc)
+        popup.showAtLocation(anchor, Gravity.NO_GRAVITY, loc[0] + dp(8), loc[1] + dp(40))
+        actionPopup = popup
+    }
+
+    private fun dismissActionPopup() {
+        actionPopup?.dismiss()
+        actionPopup = null
+    }
+
     // ---------------- 输入逻辑 ----------------
 
     override fun onInsert(text: String) {
@@ -344,29 +449,74 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
             ic.commitText(text, 1)
             return
         }
+
         // 拼音输入中：数字键选候选
         if (pinyin.isNotEmpty() && text.length == 1 && text[0].isDigit()) {
             val idx = if (text == "0") 9 else text[0].digitToInt() - 1
-            candidates.getOrNull(idx)?.let {
+            (match?.candidates ?: candidates).getOrNull(idx)?.let {
                 commitCandidate(it)
                 return
             }
         }
+        // 二三候选键：输入中 , 选第 2 个、. 选第 3 个
+        if (pinyin.isNotEmpty() && (text == "," || text == ".")) {
+            val idx = if (text == ",") 1 else 2
+            (match?.candidates ?: candidates).getOrNull(idx)?.let {
+                commitCandidate(it)
+                return
+            }
+        }
+        // 字母 -> 拼音
         if (text.length == 1 && text[0].isLetter()) {
             onLetter(text)
             return
         }
+
         if (pinyin.isNotEmpty()) commitTopCandidate()
+
+        if (text.length == 1) {
+            val ch = text[0]
+            // 成对符号：自动补全并把光标放中间；若右侧已是闭合符则直接跳过
+            TextUtils.insertPairFor(ch)?.let { (open, close) ->
+                val after = ic.getTextAfterCursor(1, 0)?.toString().orEmpty()
+                if (after.isNotEmpty() && after[0] == close[0]) {
+                    moveCursor(KeyEvent.KEYCODE_DPAD_RIGHT)
+                } else {
+                    ic.commitText(open + close, 1)
+                    moveCursor(KeyEvent.KEYCODE_DPAD_LEFT)
+                }
+                digitRun.setLength(0)
+                renderCandidates()
+                return
+            }
+            // 智能标点
+            if (ch in ",.;:?!") {
+                val before = ic.getTextBeforeCursor(1, 0)?.toString()?.lastOrNull()
+                ic.commitText(TextUtils.smartPunctuation(ch, before), 1)
+                digitRun.setLength(0)
+                renderCandidates()
+                return
+            }
+        }
+
         ic.commitText(text, 1)
-        refreshBars()
+        if (text.length == 1 && text[0].isDigit()) {
+            digitRun.append(text)
+        } else {
+            digitRun.setLength(0)
+        }
+        renderCandidates()
     }
 
     private fun onLetter(letterText: String) {
         val ic = currentInputConnection ?: return
         pinyin.append(letterText.lowercase())
         selfEdit = true
+        digitRun.setLength(0)
         ic.setComposingText(pinyin.toString(), 1)
-        candidates = TypesakeCore.cached(pinyin.toString()) ?: emptyList()
+        val cached = TypesakeCore.cached(pinyin.toString())
+        candidates = cached ?: emptyList()
+        match = match?.copy(candidates = candidates)
         renderCandidates()
         requestCandidates(pinyin.toString())
         if (shifted && !capsLock) {
@@ -379,12 +529,13 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         lookupJob?.cancel()
         lookupJob = io.launch {
             delay(15)
-            val list = TypesakeCore.candidates(p)
+            val m = TypesakeCore.analyze(p)
             withContext(Dispatchers.Main) {
                 if (pinyin.toString() == p) {
-                    candidates = list
+                    match = m
+                    candidates = m.candidates
                     renderCandidates()
-                    renderComposingEnglish(list)
+                    renderComposingEnglish(m.candidates)
                 }
             }
         }
@@ -402,20 +553,22 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
 
     private fun commitCandidate(word: String) {
         val ic = currentInputConnection ?: return
-        val pin = pinyin.toString()
+        val typed = pinyin.toString()
+        val corrected = match?.corrected == true || match?.remembered == true
         ic.commitText(word, 1)
         selfEdit = true
         pinyin.setLength(0)
         candidates = emptyList()
+        match = null
         lastCommittedChinese = word
-        if (pin.isNotEmpty()) {
-            io.launch { TypesakeCore.pick(pin, word) }
+        if (typed.isNotEmpty()) {
+            io.launch { TypesakeCore.pick(typed, word, corrected) }
         }
         afterCommit(word)
     }
 
     private fun commitTopCandidate() {
-        val top = candidates.firstOrNull() ?: pinyin.toString()
+        val top = (match?.candidates ?: candidates).firstOrNull() ?: pinyin.toString()
         if (pinyin.isNotEmpty()) commitCandidate(top)
     }
 
@@ -423,6 +576,17 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         englishChips = TypesakeCore.englishList(word)
         predictions = TypesakeCore.predict(word)
         refreshBars()
+        io.launch { TypesakeCore.bump(LocalDate.now().toString()) }
+    }
+
+    private fun commitDigitDecoration(text: String) {
+        val ic = currentInputConnection ?: return
+        if (digitRun.isNotEmpty()) {
+            ic.deleteSurroundingText(digitRun.length, 0)
+        }
+        ic.commitText(text, 1)
+        digitRun.setLength(0)
+        renderCandidates()
     }
 
     private fun insertPrediction(word: String) {
@@ -432,6 +596,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         englishChips = TypesakeCore.englishList(word)
         predictions = TypesakeCore.predict(word)
         refreshBars()
+        io.launch { TypesakeCore.bump(LocalDate.now().toString()) }
     }
 
     private fun insertEnglish(english: String) {
@@ -443,7 +608,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         refreshBars()
     }
 
-    /** 长按英文条：把刚上屏的中文替换成英文（中英混输的"改写"用法）。 */
+    /** 长按英文：把刚上屏的中文替换成英文（中英混输的"改写"用法）。 */
     private fun replaceLastChineseWith(english: String) {
         val ic = currentInputConnection ?: return
         val cn = lastCommittedChinese
@@ -463,6 +628,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
             commitTopCandidate()
         } else {
             ic.commitText(" ", 1)
+            digitRun.setLength(0)
         }
         val now = SystemClock.uptimeMillis()
         if (now - lastSpaceTap < DOUBLE_TAP_MS) {
@@ -481,8 +647,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         }
         val info = currentInputEditorInfo
         val noEnterAction = info != null && (info.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0
-        val multiline = info != null &&
-            (info.inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE) != 0
+        val multiline = info != null && (info.inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE) != 0
         val action = info?.imeOptions?.and(EditorInfo.IME_MASK_ACTION) ?: EditorInfo.IME_ACTION_NONE
         if (noEnterAction || multiline || action == EditorInfo.IME_ACTION_NONE) {
             ic.commitText("\n", 1)
@@ -499,16 +664,39 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
             if (pinyin.isEmpty()) {
                 ic.setComposingText("", 1)
                 candidates = emptyList()
+                match = null
                 renderCandidates()
             } else {
                 ic.setComposingText(pinyin.toString(), 1)
-                candidates = TypesakeCore.cached(pinyin.toString()) ?: emptyList()
+                val cached = TypesakeCore.cached(pinyin.toString())
+                candidates = cached ?: emptyList()
+                match = match?.copy(candidates = candidates)
                 renderCandidates()
                 requestCandidates(pinyin.toString())
             }
-        } else {
-            ic.deleteSurroundingText(1, 0)
+            return
         }
+        if (digitRun.isNotEmpty()) {
+            digitRun.deleteCharAt(digitRun.length - 1)
+        }
+        ic.deleteSurroundingText(1, 0)
+        renderCandidates()
+    }
+
+    /** 滑动删除：一次删掉光标前的一个词块。 */
+    override fun onDeleteWord() {
+        val ic = currentInputConnection ?: return
+        if (pinyin.isNotEmpty()) {
+            clearComposing()
+            ic.setComposingText("", 1)
+            renderCandidates()
+            return
+        }
+        val before = ic.getTextBeforeCursor(48, 0)?.toString().orEmpty()
+        val n = TextUtils.deleteWordLength(before)
+        if (n > 0) ic.deleteSurroundingText(n, 0)
+        digitRun.setLength(0)
+        renderCandidates()
     }
 
     override fun onShiftTap() {
@@ -534,7 +722,8 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
 
     override fun onShowLayer(l: KbLayer) {
         layer = l
-        keyboard.render(kind, layer, colors, prefs.keyHeightDp, clipItems.toList())
+        if (l == KbLayer.PHRASES) phrases = loadPhrases()
+        keyboard.render(kind, layer, colors, prefs.keyHeightDp, clipItems.toList(), pairList())
     }
 
     override fun onLanguage() {
@@ -593,6 +782,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         }
         val english = TypesakeCore.suggest(sentence)
         val ok = TypesakeCore.save(sentence, english)
+        if (ok) phrases = loadPhrases()
         toast(
             if (!ok) {
                 "收藏失败"
@@ -662,6 +852,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         if (pinyin.isNotEmpty() && (newSelStart != oldSelStart || newSelEnd != oldSelEnd)) {
             pinyin.setLength(0)
             candidates = emptyList()
+            match = null
             currentInputConnection?.finishComposingText()
             renderCandidates()
         }

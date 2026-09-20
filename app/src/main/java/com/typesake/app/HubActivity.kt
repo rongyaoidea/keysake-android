@@ -58,6 +58,13 @@ class HubActivity : ComponentActivity() {
                                 saved = TypesakeCore.list()
                             }) { Text("清空") }
                         }
+                        val stats = remember(tick) { TypesakeCore.stats() }
+                        Text(
+                            "已输入 ${stats.words} 词 · 连续 " +
+                                "${TextUtils.streak(stats.days, java.time.LocalDate.now().toString())} 天 · " +
+                                "收藏 ${stats.saved} · 词库 ${stats.lex} 条",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                         if (saved.isEmpty()) {
                             Card(Modifier.fillMaxWidth()) {
                                 Text(

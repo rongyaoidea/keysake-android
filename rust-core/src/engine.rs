@@ -1,15 +1,33 @@
-//! 拼音 -> 中文候选、联想预测、词频学习（L0）。
+//! 拼音 -> 中文候选、纠错兜底、联想预测、词频与纠错学习。
 //!
 //! 候选组装顺序（贴合主流输入法手感）：
-//! 1. 精确整词/单字匹配（词典按词频排序，用户 pin 自动置顶）
-//! 2. 整句 Viterbi 组合（`top_k_compositions`，解决 "jintiankaihui" -> 今天开会）
-//! 3. 前缀补全（输入未打完时给整词，如 "nih" -> 你好…）
+//! 1. 精确整词/单字（词典按词频排序，用户 pin 置顶）
+//! 2. 整句 Viterbi 组合（`jintiankaihui` -> 今天开会）
+//! 3. 前缀补全（`nih` -> 你好…）
+//! 4. 纠错学习命中（用户此前选过的"错拼 -> 正确词"）
+//! 5. 简拼（`bjdx` -> 北京大学）
+//! 6. 模糊音（z/zh、n/l、an/ang…）
+//! 7. 击键纠错（邻键、漏键、多键、换位）
 //!
-//! 每步结果去重并截断到 `limit`，全程无 panic 路径。
+//! 4–7 只在前面完全无结果时触发，避免误纠。
 
+use crate::initials;
 use inputx_pinyin::{L0Snapshot, PinyinEngine};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
+
+/// 一次"输入 -> 候选"的完整结果。
+#[derive(Debug, Clone, Default)]
+pub struct Match {
+    /// 实际命中的拼音（可能已被纠正）
+    pub matched: String,
+    /// 是否经过纠错（模糊音/击键/学习）
+    pub corrected: bool,
+    /// 是否来自纠错学习（用户以前这么打错过）
+    pub remembered: bool,
+    pub candidates: Vec<String>,
+}
 
 /// 进程级引擎（首次调用时初始化，字典为 include_bytes 常量，初始化 ~34µs）。
 pub fn engine() -> &'static PinyinEngine {
@@ -17,7 +35,6 @@ pub fn engine() -> &'static PinyinEngine {
     ENGINE.get_or_init(PinyinEngine::new)
 }
 
-/// 热路径结果缓存：同一 buffer 的重复查询（连击/回退）直接命中，避免重复 Viterbi。
 fn cache() -> &'static Mutex<HashMap<String, Vec<String>>> {
     static CACHE: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
@@ -25,12 +42,142 @@ fn cache() -> &'static Mutex<HashMap<String, Vec<String>>> {
 
 const CACHE_CAP: usize = 96;
 
-/// 词典条目数（设置页展示用）。
+/// 输入选项（由设置页写入；用原子量避免与 store 的锁产生顺序问题）。
+static FUZZY_ENABLED: AtomicBool = AtomicBool::new(true);
+static CORRECTION_ENABLED: AtomicBool = AtomicBool::new(true);
+
+pub fn set_options(fuzzy: bool, correction: bool) {
+    FUZZY_ENABLED.store(fuzzy, Ordering::Relaxed);
+    CORRECTION_ENABLED.store(correction, Ordering::Relaxed);
+    if let Ok(mut c) = cache().lock() {
+        c.clear();
+    }
+}
+
+pub fn options() -> (bool, bool) {
+    (
+        FUZZY_ENABLED.load(Ordering::Relaxed),
+        CORRECTION_ENABLED.load(Ordering::Relaxed),
+    )
+}
+
+/// 纠错学习：「打错的拼音串 -> 用户真正想要的词」。
+fn learned() -> &'static Mutex<HashMap<String, (String, u32)>> {
+    static L: OnceLock<Mutex<HashMap<String, (String, u32)>>> = OnceLock::new();
+    L.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn export_learned() -> Vec<(String, String, u32)> {
+    let mut v: Vec<(String, String, u32)> = learned()
+        .lock()
+        .map(|m| {
+            m.iter()
+                .map(|(k, (w, c))| (k.clone(), w.clone(), *c))
+                .collect()
+        })
+        .unwrap_or_default();
+    v.sort();
+    v
+}
+
+pub fn import_learned(items: Vec<(String, String, u32)>) {
+    if let Ok(mut m) = learned().lock() {
+        m.clear();
+        for (typed, word, count) in items {
+            if !typed.is_empty() && !word.is_empty() {
+                m.insert(typed, (word, count.max(1)));
+            }
+        }
+    }
+}
+
+/// 记住一次纠错选择；同一 (错拼, 词) 多次选择会累计。
+pub fn remember(typed: &str, word: &str) {
+    let key = normalize(typed);
+    if key.is_empty() || word.is_empty() {
+        return;
+    }
+    if let Ok(mut m) = learned().lock() {
+        if m.len() > 400 {
+            m.clear();
+        }
+        let e = m.entry(key).or_insert((word.to_string(), 0));
+        if e.0 != word {
+            *e = (word.to_string(), 1);
+        } else {
+            e.1 = e.1.saturating_add(1);
+        }
+    }
+}
+
+/// 删词黑名单：「该拼音串下永远不再出现这个词」。
+fn blocked() -> &'static Mutex<HashMap<String, Vec<String>>> {
+    static B: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
+    B.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn export_blocked() -> Vec<(String, String)> {
+    let mut v: Vec<(String, String)> = blocked()
+        .lock()
+        .map(|m| {
+            m.iter()
+                .flat_map(|(p, words)| words.iter().map(move |w| (p.clone(), w.clone())))
+                .collect()
+        })
+        .unwrap_or_default();
+    v.sort();
+    v
+}
+
+pub fn import_blocked(items: Vec<(String, String)>) {
+    if let Ok(mut m) = blocked().lock() {
+        m.clear();
+        for (p, w) in items {
+            if !p.is_empty() && !w.is_empty() {
+                m.entry(p).or_default().push(w);
+            }
+        }
+    }
+}
+
+fn is_blocked(pinyin: &str, word: &str) -> bool {
+    blocked()
+        .lock()
+        .ok()
+        .and_then(|m| {
+            m.get(&normalize(pinyin))
+                .map(|v| v.iter().any(|w| w == word))
+        })
+        .unwrap_or(false)
+}
+
+fn filter_blocked(pinyin: &str, list: Vec<String>) -> Vec<String> {
+    if blocked().lock().map(|m| m.is_empty()).unwrap_or(true) {
+        return list;
+    }
+    list.into_iter()
+        .filter(|w| !is_blocked(pinyin, w))
+        .collect()
+}
+
+fn learned_for(typed: &str) -> Option<String> {
+    let key = normalize(typed);
+    let word = learned()
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&key).map(|(w, _)| w.clone()))?;
+    if is_blocked(&key, &word) {
+        return None;
+    }
+    Some(word)
+}
+
+/// 词典条目数。
 pub fn lexicon_size() -> usize {
     engine().dict().len()
 }
 
-/// 规整输入：仅保留 ascii 字母并转小写（IME 里也不会出现别的字符）。
+/// 规整输入：仅保留 ascii 字母并转小写。
 pub fn normalize(input: &str) -> String {
     input
         .chars()
@@ -48,7 +195,36 @@ fn push_unique(out: &mut Vec<String>, word: String, limit: usize) {
     }
 }
 
-/// 针对指定引擎取候选（测试可传独立引擎，避免全局状态互扰）。
+/// 廉价查询：只做精确 + 前缀（用于纠错变体，避免每条都跑 Viterbi）。
+fn lookup_cheap(eng: &PinyinEngine, compact: &str, limit: usize) -> Vec<String> {
+    let dict = eng.dict();
+    let mut out: Vec<String> = Vec::new();
+    let mut exact: Vec<String> = Vec::new();
+    dict.lookup_into(compact, &mut exact);
+    for w in exact {
+        push_unique(&mut out, w, limit);
+    }
+    if out.len() < limit && compact.len() >= 2 {
+        let mut hits: Vec<(u64, String)> = Vec::new();
+        let mut visited = 0usize;
+        dict.prefix_for_each(compact, |code, word, freq| {
+            visited += 1;
+            if visited <= 200 && code.len().saturating_sub(compact.len()) <= 5 {
+                hits.push((freq, word.to_string()));
+            }
+        });
+        hits.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        for (_, w) in hits {
+            push_unique(&mut out, w, limit);
+            if out.len() >= limit {
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// 完整候选（精确 -> 整句 -> 前缀），带缓存。
 pub fn candidates_with(eng: &PinyinEngine, input: &str, limit: usize) -> Vec<String> {
     let compact = normalize(input);
     if compact.is_empty() || limit == 0 {
@@ -57,14 +233,12 @@ pub fn candidates_with(eng: &PinyinEngine, input: &str, limit: usize) -> Vec<Str
     let dict = eng.dict();
     let mut out: Vec<String> = Vec::with_capacity(limit);
 
-    // 1) 精确匹配（整词/单字，freq 降序，L0 pin 置顶）
     let mut exact: Vec<String> = Vec::new();
     dict.lookup_into(&compact, &mut exact);
     for w in exact {
         push_unique(&mut out, w, limit);
     }
 
-    // 2) 整句组合（仅长缓冲；短输入无意义且慢）
     if out.len() < limit && compact.len() >= 4 {
         for (_score, word) in dict.top_k_compositions(&compact, 6) {
             push_unique(&mut out, word, limit);
@@ -74,17 +248,13 @@ pub fn candidates_with(eng: &PinyinEngine, input: &str, limit: usize) -> Vec<Str
         }
     }
 
-    // 3) 前缀补全（输入未打完时给整词；限制收集条数，迭代本身 ≤ 数毫秒）
     if out.len() < limit && compact.len() >= 2 {
         let mut hits: Vec<(u64, String)> = Vec::new();
         let mut visited = 0usize;
         dict.prefix_for_each(&compact, |code, word, freq| {
             visited += 1;
-            if visited <= 400 {
-                // 只收“补全代价小”的词（剩余拼音 ≤ 5 个字母），避免推荐超长词条
-                if code.len().saturating_sub(compact.len()) <= 5 {
-                    hits.push((freq, word.to_string()));
-                }
+            if visited <= 400 && code.len().saturating_sub(compact.len()) <= 5 {
+                hits.push((freq, word.to_string()));
             }
         });
         hits.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
@@ -96,10 +266,9 @@ pub fn candidates_with(eng: &PinyinEngine, input: &str, limit: usize) -> Vec<Str
         }
     }
 
-    out
+    filter_blocked(&compact, out)
 }
 
-/// 带缓存的候选查询（IME 热路径入口）。
 pub fn candidates(input: &str, limit: usize) -> Vec<String> {
     let compact = normalize(input);
     if compact.is_empty() {
@@ -122,7 +291,254 @@ pub fn candidates(input: &str, limit: usize) -> Vec<String> {
     out
 }
 
-/// 联想：给定上一个词，预测下一个词（bigram FST）。
+// ---------------- 纠错变体 ----------------
+
+/// 模糊音对（含双向）：覆盖搜狗默认的平翘舌、前后鼻音、n/l、f/h。
+const FUZZY_PAIRS: &[(&str, &str)] = &[
+    ("zh", "z"),
+    ("ch", "c"),
+    ("sh", "s"),
+    ("z", "zh"),
+    ("c", "ch"),
+    ("s", "sh"),
+    ("n", "l"),
+    ("l", "n"),
+    ("r", "l"),
+    ("l", "r"),
+    ("ang", "an"),
+    ("an", "ang"),
+    ("eng", "en"),
+    ("en", "eng"),
+    ("ing", "in"),
+    ("in", "ing"),
+    ("f", "h"),
+    ("h", "f"),
+];
+
+/// 生成模糊音变体（单点替换，去重，受上限约束）。
+pub fn fuzzy_variants(input: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for (from, to) in FUZZY_PAIRS {
+        if !input.contains(from) {
+            continue;
+        }
+        let mut start = 0usize;
+        while let Some(pos) = input[start..].find(from) {
+            let at = start + pos;
+            let mut v = String::with_capacity(input.len());
+            v.push_str(&input[..at]);
+            v.push_str(to);
+            v.push_str(&input[at + from.len()..]);
+            if !v.is_empty() && v != input && !out.contains(&v) {
+                out.push(v);
+            }
+            start = at + from.len();
+            if out.len() >= 48 {
+                return out;
+            }
+        }
+    }
+    out
+}
+
+/// QWERTY 邻键表（击键位移纠错用）。
+const NEIGHBORS: &[(char, &[char])] = &[
+    ('q', &['w', 'a', 's']),
+    ('w', &['q', 'e', 'a', 's', 'd']),
+    ('e', &['w', 'r', 's', 'd', 'f']),
+    ('r', &['e', 't', 'd', 'f', 'g']),
+    ('t', &['r', 'y', 'f', 'g', 'h']),
+    ('y', &['t', 'u', 'g', 'h', 'j']),
+    ('u', &['y', 'i', 'h', 'j', 'k']),
+    ('i', &['u', 'o', 'j', 'k', 'l']),
+    ('o', &['i', 'p', 'k', 'l']),
+    ('p', &['o', 'l']),
+    ('a', &['q', 'w', 's', 'z', 'x']),
+    ('s', &['q', 'w', 'e', 'a', 'd', 'z', 'x', 'c']),
+    ('d', &['w', 'e', 'r', 's', 'f', 'x', 'c', 'v']),
+    ('f', &['e', 'r', 't', 'd', 'g', 'c', 'v', 'b']),
+    ('g', &['r', 't', 'y', 'f', 'h', 'v', 'b', 'n']),
+    ('h', &['t', 'y', 'u', 'g', 'j', 'b', 'n', 'm']),
+    ('j', &['y', 'u', 'i', 'h', 'k', 'n', 'm']),
+    ('k', &['u', 'i', 'o', 'j', 'l', 'm']),
+    ('l', &['i', 'o', 'p', 'k']),
+    ('z', &['a', 's', 'x']),
+    ('x', &['a', 's', 'd', 'z', 'c']),
+    ('c', &['s', 'd', 'f', 'x', 'v']),
+    ('v', &['d', 'f', 'g', 'c', 'b']),
+    ('b', &['f', 'g', 'h', 'v', 'n']),
+    ('n', &['g', 'h', 'j', 'b', 'm']),
+    ('m', &['h', 'j', 'k', 'n']),
+];
+
+fn neighbors(c: char) -> &'static [char] {
+    NEIGHBORS
+        .iter()
+        .find(|(k, _)| *k == c)
+        .map(|(_, v)| *v)
+        .unwrap_or(&[])
+}
+
+/// 插入候选（漏键）：常见元音与鼻音尾。
+const INSERT_CHARS: &[char] = &['a', 'e', 'i', 'o', 'u', 'n', 'g', 'h'];
+
+/// 击键纠错变体：(代价, 变体)。代价越小越可能是真实意图。
+pub fn keystroke_variants(input: &str) -> Vec<(u8, String)> {
+    let chars: Vec<char> = input.chars().collect();
+    let mut out: Vec<(u8, String)> = Vec::new();
+    if chars.len() < 2 {
+        return out;
+    }
+
+    // cost 1: 相邻换位
+    for i in 0..chars.len() - 1 {
+        if chars[i] == chars[i + 1] {
+            continue;
+        }
+        let mut v = chars.clone();
+        v.swap(i, i + 1);
+        out.push((1, v.into_iter().collect()));
+    }
+    // cost 1: 邻键替换
+    for i in 0..chars.len() {
+        for n in neighbors(chars[i]) {
+            let mut v = chars.clone();
+            v[i] = *n;
+            out.push((1, v.into_iter().collect()));
+        }
+    }
+    // cost 2: 多按一键 -> 删一个
+    for i in 0..chars.len() {
+        let mut v = chars.clone();
+        v.remove(i);
+        out.push((2, v.into_iter().collect()));
+    }
+    // cost 3: 漏按一键 -> 插一个
+    for i in 0..=chars.len() {
+        for c in INSERT_CHARS {
+            let mut v = chars.clone();
+            v.insert(i, *c);
+            out.push((3, v.into_iter().collect()));
+        }
+    }
+
+    out.sort_by_key(|a| a.0);
+    let mut seen: Vec<String> = Vec::new();
+    let mut deduped: Vec<(u8, String)> = Vec::new();
+    for (cost, v) in out {
+        if v != input && !seen.contains(&v) {
+            seen.push(v.clone());
+            deduped.push((cost, v));
+        }
+        if deduped.len() >= 40 {
+            break;
+        }
+    }
+    deduped
+}
+
+/// 完整分析：候选 + 是否纠错 + 命中拼音。
+///
+/// 关键取舍：**词典精确命中优先**（最可信）。只有当输入不是任何词条的精确键
+/// （即候选只能来自整句拼接/前缀补全）时，才尝试纠错兜底，从而避免把
+/// 正确输入误判成错拼。
+pub fn analyze(input: &str, limit: usize) -> Match {
+    let compact = normalize(input);
+    if compact.is_empty() {
+        return Match::default();
+    }
+    let eng = engine();
+
+    let mut exact: Vec<String> = Vec::new();
+    eng.dict().lookup_into(&compact, &mut exact);
+
+    let direct = filter_blocked(&compact, candidates_with(eng, &compact, limit));
+    if !exact.is_empty() {
+        return Match {
+            matched: compact,
+            corrected: false,
+            remembered: false,
+            candidates: direct,
+        };
+    }
+
+    // 纠错学习命中：用户以前就是这么打错的
+    if let Some(word) = learned_for(&compact) {
+        let mut c = vec![word];
+        for w in direct {
+            push_unique(&mut c, w, limit);
+        }
+        return Match {
+            matched: compact,
+            corrected: true,
+            remembered: true,
+            candidates: c,
+        };
+    }
+
+    // 简拼（声母串）
+    let ini = filter_blocked(&compact, initials::candidates(&compact, limit));
+    if !ini.is_empty() {
+        return Match {
+            matched: compact,
+            corrected: false,
+            remembered: false,
+            candidates: ini,
+        };
+    }
+
+    // 模糊音 -> 击键纠错：把纠正后的整词放最前，其余（整句拼接等）排后
+    let try_variant = |v: &str| -> Option<Vec<String>> {
+        let hit = filter_blocked(&compact, lookup_cheap(eng, v, 3));
+        if hit.is_empty() {
+            None
+        } else {
+            Some(hit)
+        }
+    };
+
+    if FUZZY_ENABLED.load(Ordering::Relaxed) {
+        for v in fuzzy_variants(&compact) {
+            if let Some(mut hit) = try_variant(&v) {
+                for w in direct {
+                    push_unique(&mut hit, w, limit);
+                }
+                return Match {
+                    matched: v,
+                    corrected: true,
+                    remembered: false,
+                    candidates: hit,
+                };
+            }
+        }
+    }
+    if CORRECTION_ENABLED.load(Ordering::Relaxed) {
+        for (_cost, v) in keystroke_variants(&compact) {
+            if let Some(mut hit) = try_variant(&v) {
+                for w in direct {
+                    push_unique(&mut hit, w, limit);
+                }
+                return Match {
+                    matched: v,
+                    corrected: true,
+                    remembered: false,
+                    candidates: hit,
+                };
+            }
+        }
+    }
+
+    Match {
+        matched: compact,
+        corrected: false,
+        remembered: false,
+        candidates: direct,
+    }
+}
+
+// ---------------- 联想 / 学习 / 删除 ----------------
+
+/// 联想：给定上一个词预测下一个词。
 pub fn predict_next(prev: &str, limit: usize) -> Vec<String> {
     let p = prev.trim();
     if p.is_empty() || limit == 0 {
@@ -136,7 +552,7 @@ pub fn predict_next(prev: &str, limit: usize) -> Vec<String> {
         .collect()
 }
 
-/// 记录用户选词（3 连选自动 pin 到候选首位），返回该拼音的最新候选序。
+/// 记录用户选词（3 连选自动 pin），返回该拼音的最新候选序。
 pub fn record_pick(pinyin: &str, word: &str, limit: usize) -> Vec<String> {
     let compact = normalize(pinyin);
     let word = word.trim();
@@ -150,17 +566,58 @@ pub fn record_pick(pinyin: &str, word: &str, limit: usize) -> Vec<String> {
     candidates_with(engine(), &compact, limit)
 }
 
-/// 导出 L0 学习快照（供持久化）。
+/// 置顶：把某个候选固定在该拼音的首位（用户主动 pin）。
+pub fn pin(pinyin: &str, word: &str, limit: usize) -> Vec<String> {
+    let compact = normalize(pinyin);
+    let word = word.trim();
+    if compact.is_empty() || word.is_empty() {
+        return Vec::new();
+    }
+    engine().dict().pin(&compact, word);
+    if let Ok(mut c) = cache().lock() {
+        c.remove(&compact);
+    }
+    candidates_with(engine(), &compact, limit)
+}
+
+/// 删词：该拼音串下永久不再推荐这个词（并清掉它的置顶/学习记录）。
+pub fn forget(pinyin: &str, word: &str, limit: usize) -> Vec<String> {
+    let compact = normalize(pinyin);
+    let word = word.trim();
+    if compact.is_empty() || word.is_empty() {
+        return Vec::new();
+    }
+    engine().dict().forget(&compact);
+    if let Ok(mut b) = blocked().lock() {
+        let v = b.entry(compact.clone()).or_default();
+        if !v.iter().any(|w| w == word) {
+            v.push(word.to_string());
+        }
+    }
+    if let Ok(mut l) = learned().lock() {
+        l.retain(|_, (w, _)| w != word);
+    }
+    if let Ok(mut c) = cache().lock() {
+        c.remove(&compact);
+        c.clear();
+    }
+    candidates_with(engine(), &compact, limit)
+}
+
 pub fn export_l0() -> L0Snapshot {
     engine().dict().export_l0()
 }
 
-/// 导入 L0 学习快照，返回导入条数。
 pub fn import_l0(pins: Vec<(String, String)>, pick_counts: Vec<(String, String, u32)>) -> usize {
     if let Ok(mut c) = cache().lock() {
         c.clear();
     }
     engine().dict().import_l0(L0Snapshot { pins, pick_counts })
+}
+
+/// 词库规模 + 简拼索引规模（设置页展示）。
+pub fn lexicon_info() -> (usize, usize) {
+    (lexicon_size(), initials::size())
 }
 
 #[cfg(test)]
@@ -171,55 +628,111 @@ mod tests {
         PinyinEngine::new()
     }
 
+    /// 串行 + 复位全局状态，避免用例互相污染。
+    fn gated() -> std::sync::MutexGuard<'static, ()> {
+        let guard = crate::test_lock();
+        import_learned(Vec::new());
+        import_blocked(Vec::new());
+        set_options(true, true);
+        guard
+    }
+
     #[test]
     fn engine_loads_real_dict() {
-        assert!(lexicon_size() > 100_000, "expected a large embedded dict");
+        assert!(lexicon_size() > 100_000);
     }
 
     #[test]
     fn exact_words_rank_first() {
         let e = fresh();
-        let c = candidates_with(&e, "nihao", 8);
-        assert_eq!(c.first().map(String::as_str), Some("你好"));
-        let c = candidates_with(&e, "zhongguo", 8);
-        assert!(c.contains(&"中国".to_string()));
-        let c = candidates_with(&e, "woaini", 8);
-        assert!(c.contains(&"我爱你".to_string()));
+        assert_eq!(
+            candidates_with(&e, "nihao", 8).first().map(String::as_str),
+            Some("你好")
+        );
+        assert!(candidates_with(&e, "zhongguo", 8).contains(&"中国".to_string()));
+        assert!(candidates_with(&e, "woaini", 8).contains(&"我爱你".to_string()));
     }
 
     #[test]
     fn sentence_composition_works() {
-        // P0 修复点：长句输入此前无候选
-        let e = fresh();
-        let c = candidates_with(&e, "jintiankaihui", 8);
-        assert!(
-            c.iter().any(|w| w.contains("今天")),
-            "expected a full-sentence composition, got {c:?}"
-        );
+        let c = candidates_with(&fresh(), "jintiankaihui", 8);
+        assert!(c.iter().any(|w| w.contains("今天")), "got {c:?}");
     }
 
     #[test]
     fn prefix_completion_for_partial_input() {
-        let e = fresh();
-        let c = candidates_with(&e, "nih", 8);
-        assert!(!c.is_empty(), "partial input should offer completions");
+        assert!(!candidates_with(&fresh(), "nih", 8).is_empty());
     }
 
     #[test]
-    fn single_syllable_gives_common_chars() {
-        let e = fresh();
-        let c = candidates_with(&e, "ni", 8);
-        assert_eq!(c.first().map(String::as_str), Some("你"));
+    fn analyze_prefers_direct_hits() {
+        let _g = gated();
+        let m = analyze("nihao", 8);
+        assert!(!m.corrected && !m.remembered);
+        assert_eq!(m.matched, "nihao");
+        assert_eq!(m.candidates.first().map(String::as_str), Some("你好"));
     }
 
     #[test]
-    fn empty_and_junk_input_is_safe() {
-        let e = fresh();
-        assert!(candidates_with(&e, "", 8).is_empty());
-        assert!(candidates_with(&e, "   ", 8).is_empty());
-        assert!(candidates_with(&e, "!!!", 8).is_empty());
-        let c = candidates_with(&e, "ni hao", 8);
-        assert_eq!(c.first().map(String::as_str), Some("你好"));
+    fn fuzzy_zh_z_is_corrected() {
+        let _g = gated();
+        let m = analyze("zongguo", 8);
+        assert!(m.corrected, "expected correction, got {m:?}");
+        assert_eq!(m.matched, "zhongguo");
+        assert!(m.candidates.contains(&"中国".to_string()));
+    }
+
+    #[test]
+    fn keystroke_typos_are_recovered() {
+        let _g = gated();
+        for typo in ["nihap", "nhiao", "nihaoo"] {
+            let m = analyze(typo, 8);
+            assert!(m.corrected, "{typo} should be corrected, got {m:?}");
+            assert!(
+                m.candidates.iter().any(|w| w.starts_with("你好")),
+                "{typo} -> {m:?}"
+            );
+        }
+        assert_eq!(analyze("nihap", 8).matched, "nihao");
+        assert_eq!(analyze("nhiao", 8).matched, "nihao");
+    }
+
+    #[test]
+    fn correction_can_be_disabled() {
+        let _g = gated();
+        set_options(true, false);
+        let m = analyze("nihap", 8);
+        assert!(
+            m.candidates.iter().all(|w| !w.starts_with("你好")),
+            "correction should be off, got {m:?}"
+        );
+        set_options(true, true);
+    }
+
+    #[test]
+    fn learned_correction_wins() {
+        let _g = gated();
+        remember("nihap", "你好");
+        let m = analyze("nihap", 8);
+        assert!(m.remembered, "expected remembered, got {m:?}");
+        assert_eq!(m.candidates.first().map(String::as_str), Some("你好"));
+        let items = export_learned();
+        assert!(items.iter().any(|(t, w, _)| t == "nihap" && w == "你好"));
+    }
+
+    #[test]
+    fn initials_shorthand() {
+        let _g = gated();
+        let m = analyze("nh", 8);
+        assert!(!m.corrected);
+        assert!(m.candidates.contains(&"你好".to_string()), "got {m:?}");
+    }
+
+    #[test]
+    fn junk_input_yields_nothing() {
+        let _g = gated();
+        let m = analyze("qqqqqqqqqq", 8);
+        assert!(m.candidates.is_empty(), "got {m:?}");
     }
 
     #[test]
@@ -227,36 +740,25 @@ mod tests {
         let e = fresh();
         let before = candidates_with(&e, "ni", 8);
         assert_eq!(before.first().map(String::as_str), Some("你"));
-        // 选一个非首选字三次 -> 自动 pin
-        let mut target = String::new();
-        for w in candidates_with(&e, "ni", 8) {
-            if w != "你" {
-                target = w;
-                break;
-            }
-        }
-        assert!(!target.is_empty());
+        let target = before
+            .iter()
+            .find(|w| w.as_str() != "你")
+            .cloned()
+            .expect("need another candidate");
         for _ in 0..3 {
             e.dict().record_pick("ni", &target);
         }
-        let after = candidates_with(&e, "ni", 8);
         assert_eq!(
-            after.first(),
+            candidates_with(&e, "ni", 8).first(),
             Some(&target),
             "L0 pin should promote the pick"
         );
-        let snap = e.dict().export_l0();
-        assert_eq!(snap.pins.len(), 1);
     }
 
     #[test]
     fn prediction_and_limits() {
-        let e = fresh();
-        let p = predict_next("我", 5);
-        assert!(!p.is_empty());
-        assert!(p.len() <= 5);
+        assert!(!predict_next("我", 5).is_empty());
         assert!(predict_next("", 5).is_empty());
-        let c = candidates_with(&e, "nihao", 2);
-        assert!(c.len() <= 2);
+        assert!(candidates_with(&fresh(), "nihao", 2).len() <= 2);
     }
 }

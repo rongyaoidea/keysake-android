@@ -7,6 +7,7 @@ import com.typesake.app.kb.KbLayouts
 import com.typesake.app.kb.OneHand
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -124,6 +125,23 @@ class KbModelsTest {
         assertEquals(OneHand.NONE, OneHand.RIGHT.next())
         assertEquals(OneHand.RIGHT, OneHand.fromInt(2))
         assertEquals(OneHand.NONE, OneHand.fromInt(99))
+    }
+
+    @Test
+    fun phrasesLayerIsReachable() {
+        val labels = KbLayouts.symbolRows().flatMap { it.keys }.map { it.label }
+        assertTrue(labels.contains("📝"))
+    }
+
+    @Test
+    fun swipeUpMapsToDigitsAndSymbols() {
+        assertEquals("1", KbLayouts.swipeUpFor("q"))
+        assertEquals("0", KbLayouts.swipeUpFor("p"))
+        assertEquals("!", KbLayouts.swipeUpFor("1"))
+        assertEquals(")", KbLayouts.swipeUpFor("0"))
+        assertEquals("@", KbLayouts.swipeUpFor("a"))
+        assertNull(KbLayouts.swipeUpFor("á"))
+        assertNull(KbLayouts.swipeUpFor("⇧"))
     }
 
     @Test

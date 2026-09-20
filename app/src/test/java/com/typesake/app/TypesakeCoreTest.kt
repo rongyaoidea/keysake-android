@@ -32,6 +32,47 @@ class TypesakeCoreTest {
     }
 
     @Test
+    fun analyzeProtocolParsing() {
+        val corrected = TypesakeCore.parseMatch("1\u001Enihao\u001F你好\u001F你号", "nihap")
+        assertTrue(corrected.corrected)
+        assertFalse(corrected.remembered)
+        assertEquals("nihao", corrected.matched)
+        assertEquals(listOf("你好", "你号"), corrected.candidates)
+
+        val remembered = TypesakeCore.parseMatch("2\u001Enihap\u001F你好", "nihap")
+        assertTrue(remembered.remembered)
+        assertTrue(remembered.corrected)
+
+        val direct = TypesakeCore.parseMatch("0\u001Enihao\u001F你好", "nihao")
+        assertFalse(direct.corrected)
+        assertEquals("nihao", direct.matched)
+    }
+
+    @Test
+    fun analyzeWithoutLibraryFallsBack() {
+        val m = TypesakeCore.analyze("nihao")
+        assertFalse(m.corrected)
+        assertEquals("你好", m.candidates.first())
+        assertEquals("nihao", m.matched)
+    }
+
+    @Test
+    fun statsJsonFieldParsing() {
+        val raw = "{\"ok\":true,\"words\":42,\"days\":[\"2026-09-19\",\"2026-09-20\"],\"saved\":2,\"fuzzy\":true,\"correction\":false}"
+        assertEquals(42, TypesakeCore.intField(raw, "words"))
+        assertEquals(listOf("2026-09-19", "2026-09-20"), TypesakeCore.stringArrayField(raw, "days"))
+        assertTrue(TypesakeCore.boolField(raw, "fuzzy"))
+        assertFalse(TypesakeCore.boolField(raw, "correction"))
+    }
+
+    @Test
+    fun statsFallbackIsEmpty() {
+        val s = TypesakeCore.stats()
+        assertEquals(0L, s.words)
+        assertTrue(s.days.isEmpty())
+    }
+
+    @Test
     fun fallbackSuggestAndExplain() {
         assertEquals("Thank you!", TypesakeCore.suggest("谢谢"))
         assertEquals("", TypesakeCore.suggest("完全未知的句子"))

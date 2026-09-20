@@ -45,6 +45,7 @@ class KeyboardView(
         fun onCursorLeft()
         fun onCursorRight()
         fun onClipboardClear()
+        fun onDeleteWord()
     }
 
     var kind: KbKind = KbKind.QWERTY
@@ -59,9 +60,12 @@ class KeyboardView(
     private var colors: KbColors = KbThemes.light
     private var rowHeightPx: Int = dp(46)
     private var clipItems: List<String> = emptyList()
+    private var clipPhrases: List<Pair<String, String>> = emptyList()
 
     private val rows = LinearLayout(context).apply { orientation = VERTICAL }
     private val handler = Handler(Looper.getMainLooper())
+    private var downX = 0f
+    private var downY = 0f
     private var preview: PopupWindow? = null
     private var alternates: PopupWindow? = null
     private var longPress: Runnable? = null
@@ -79,18 +83,21 @@ class KeyboardView(
         colors: KbColors,
         keyHeightDp: Int,
         clipboardItems: List<String> = clipItems,
+        phrases: List<Pair<String, String>> = clipPhrases,
     ) {
         this.kind = kind
         this.layer = if (kind == KbKind.QWERTY || kind == KbKind.RAW) layer else KbLayer.LETTERS
         this.colors = colors
         this.rowHeightPx = dp(TypesakePrefs.sanitizeKeyHeight(keyHeightDp))
         this.clipItems = clipboardItems
+        this.clipPhrases = phrases
         dismissPopups()
         rows.removeAllViews()
         setBackgroundColor(colors.bg)
         when (this.layer) {
             KbLayer.EMOJI -> buildEmojiPanel()
             KbLayer.CLIPBOARD -> buildClipboardPanel()
+            KbLayer.PHRASES -> buildPhrasesPanel()
             else -> buildKeys()
         }
     }
@@ -110,6 +117,14 @@ class KeyboardView(
         if (layer == KbLayer.CLIPBOARD) {
             rows.removeAllViews()
             buildClipboardPanel()
+        }
+    }
+
+    fun setPhrases(phrases: List<Pair<String, String>>) {
+        clipPhrases = phrases
+        if (layer == KbLayer.PHRASES) {
+            rows.removeAllViews()
+            buildPhrasesPanel()
         }
     }
 
@@ -242,6 +257,57 @@ class KeyboardView(
         )
     }
 
+    private fun buildPhrasesPanel() {
+        val scroll = ScrollView(context)
+        val list = LinearLayout(context).apply { orientation = VERTICAL }
+        if (clipPhrases.isEmpty()) {
+            list.addView(
+                TextView(context).apply {
+                    text = "还没有收藏。打拼音后点 ★ 或双击空格收藏整句。"
+                    setTextColor(colors.hint)
+                    setPadding(dp(12), dp(10), dp(12), dp(10))
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                }
+            )
+        } else {
+            for ((cn, en) in clipPhrases.take(20)) {
+                val title = if (en.isBlank()) cn else "$cn  ·  $en"
+                list.addView(
+                    TextView(context).apply {
+                        text = title
+                        setTextColor(colors.keyText)
+                        gravity = Gravity.CENTER_VERTICAL
+                        maxLines = 1
+                        setPadding(dp(12), 0, dp(12), 0)
+                        background = rounded(colors.key, dp(6))
+                        setOnClickListener { listener?.onInsert(cn) }
+                        setOnLongClickListener {
+                            if (en.isNotBlank()) listener?.onInsert(en)
+                            true
+                        }
+                    },
+                    LayoutParams(LayoutParams.MATCH_PARENT, rowHeightPx).apply {
+                        bottomMargin = dp(4)
+                    }
+                )
+            }
+        }
+        scroll.addView(list)
+        rows.addView(
+            scroll,
+            LayoutParams(LayoutParams.MATCH_PARENT, rowHeightPx * 4).apply { topMargin = dp(4) }
+        )
+        rows.addView(
+            actionBar(
+                listOf(
+                    BarAction("ABC", onClick = { listener?.onShowLayer(KbLayer.LETTERS) }),
+                    BarAction("提示：长按插入英文", onClick = {}),
+                )
+            ),
+            LayoutParams(LayoutParams.MATCH_PARENT, rowHeightPx).apply { topMargin = dp(4) }
+        )
+    }
+
     private class BarAction(val label: String, val onClick: () -> Unit)
 
     private fun actionBar(items: List<BarAction>): LinearLayout {
@@ -298,6 +364,8 @@ class KeyboardView(
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 v.isPressed = true
+                downX = e.x
+                downY = e.y
                 feedback(v)
                 if (!(v as KeyButton).key.isActionKey) showPreview(v)
                 scheduleLongPress(v)
@@ -307,7 +375,22 @@ class KeyboardView(
                 cancelPendingLongPress()
                 v.isPressed = false
                 dismissPreview()
-                if (alternates == null && inside(v, e)) perform((v as KeyButton).key)
+                if (alternates == null && inside(v, e)) {
+                    val key = (v as KeyButton).key
+                    val dx = e.x - downX
+                    val dy = e.y - downY
+                    when {
+                        dy < -SWIPE_THRESHOLD && dx < SWIPE_THRESHOLD_ORTHO ->
+                            swipeUp(key)
+                        key.action is KbAction.Backspace && dx < -SWIPE_THRESHOLD ->
+                            listener?.onDeleteWord()
+                        key.action is KbAction.Space && dx > SWIPE_THRESHOLD ->
+                            listener?.onCursorRight()
+                        key.action is KbAction.Space && dx < -SWIPE_THRESHOLD ->
+                            listener?.onCursorLeft()
+                        else -> perform(key)
+                    }
+                }
                 dismissAlternates()
                 return true
             }
@@ -327,6 +410,16 @@ class KeyboardView(
             }
         }
         return false
+    }
+
+    /** 上滑：字母/符号键插入备选字符（搜狗"上滑符号"的等价实现）。 */
+    private fun swipeUp(key: KbKey) {
+        val alt = KbLayouts.swipeUpFor(key.label)
+        if (alt != null) {
+            listener?.onInsert(alt)
+        } else {
+            perform(key)
+        }
     }
 
     private fun inside(v: View, e: MotionEvent): Boolean =
@@ -463,5 +556,7 @@ class KeyboardView(
 
     private companion object {
         const val LONG_PRESS_MS = 420L
+        const val SWIPE_THRESHOLD = 60f
+        const val SWIPE_THRESHOLD_ORTHO = 90f
     }
 }

@@ -4,10 +4,10 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 /**
- * JNI 桥：优先调 Rust `libtypesake_core.so`，缺库时用 Kotlin 兜底，保证可装可用。
+ * JNI 桥：优先调 Rust `libtypesake_core.so`，缺库时用 Kotlin 兜底。
  *
- * 热路径约定：候选用 `\u{1F}` 分隔串返回（避免每键 JSON 解析），并带 LRU 缓存；
- * 收藏/初始化等冷路径仍用 JSON。所有 JNI 调用在 Rust 侧都有 catch_unwind。
+ * 协议：热路径返回分隔串（US='\u{1E}' 字段分隔，GS='\u{1F}' 列表分隔），
+ * 冷路径（收藏/统计/初始化）返回 JSON。所有 JNI 在 Rust 侧都有 catch_unwind。
  */
 object TypesakeCore {
     @Serializable
@@ -17,7 +17,26 @@ object TypesakeCore {
         val saved_at: Long = 0L,
     )
 
+    /** 一次输入的分析结果。 */
+    data class Match(
+        val matched: String,
+        val corrected: Boolean,
+        val remembered: Boolean,
+        val candidates: List<String>,
+    )
+
+    data class Stats(
+        val words: Long = 0L,
+        val days: List<String> = emptyList(),
+        val saved: Int = 0,
+        val lex: Long = 0L,
+        val initials: Int = 0,
+        val fuzzy: Boolean = true,
+        val correction: Boolean = true,
+    )
+
     private const val DELIM = '\u001F'
+    private const val FIELD = '\u001E'
     private const val CACHE_MAX = 64
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -31,7 +50,7 @@ object TypesakeCore {
     var available: Boolean = false
         private set
 
-    private var lexicon: Long = 0L
+    private var lexEntries: Long = 0L
 
     init {
         available = try {
@@ -45,9 +64,15 @@ object TypesakeCore {
     // ---- JNI（Rust #[no_mangle] 实现） ----
     @JvmStatic private external fun initStorage(dir: String): String
     @JvmStatic private external fun lexiconSize(): String
-    @JvmStatic private external fun candidatesFor(pinyin: String): String
-    @JvmStatic private external fun pickCandidate(pinyin: String, word: String): String
+    @JvmStatic private external fun analyzeInput(input: String): String
+    @JvmStatic private external fun candidatesFor(input: String): String
+    @JvmStatic private external fun pickCandidate(pinyin: String, word: String, corrected: Boolean): String
+    @JvmStatic private external fun pinCandidate(pinyin: String, word: String): String
+    @JvmStatic private external fun forgetCandidate(pinyin: String, word: String): String
     @JvmStatic private external fun predictNext(word: String): String
+    @JvmStatic private external fun setEngineOptions(fuzzy: Boolean, correction: Boolean): String
+    @JvmStatic private external fun bumpStats(today: String): String
+    @JvmStatic private external fun statsInfo(): String
     @JvmStatic private external fun suggestEnglish(chinese: String): String
     @JvmStatic private external fun englishCandidates(chinese: String): String
     @JvmStatic private external fun grammarExplain(english: String): String
@@ -63,6 +88,32 @@ object TypesakeCore {
     internal fun intField(jsonish: String, key: String): Int =
         Regex("\"$key\":(\\d+)").find(jsonish)?.groupValues?.get(1)?.toIntOrNull() ?: 0
 
+    internal fun longField(jsonish: String, key: String): Long =
+        Regex("\"$key\":(\\d+)").find(jsonish)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+
+    internal fun boolField(jsonish: String, key: String): Boolean =
+        Regex("\"$key\":(true|false)").find(jsonish)?.groupValues?.get(1) == "true"
+
+    internal fun stringArrayField(jsonish: String, key: String): List<String> {
+        val body = Regex("\"$key\":\\[(.*?)]").find(jsonish)?.groupValues?.get(1) ?: return emptyList()
+        return Regex("\"([^\"]*)\"").findAll(body).map { it.groupValues[1] }.toList()
+    }
+
+    /** 解析 analyzeInput 的三段协议。 */
+    internal fun parseMatch(raw: String, fallbackPinyin: String): Match {
+        val parts = raw.split(FIELD)
+        if (parts.size < 3) {
+            return Match(fallbackPinyin, false, false, splitDelim(raw))
+        }
+        val flag = parts[0]
+        return Match(
+            matched = parts[1].ifEmpty { fallbackPinyin },
+            corrected = flag == "1" || flag == "2",
+            remembered = flag == "2",
+            candidates = splitDelim(parts[2]),
+        )
+    }
+
     // ---- 公开 API ----
 
     /** 初始化存储目录，返回已载入收藏数。 */
@@ -70,27 +121,34 @@ object TypesakeCore {
         if (!available) return 0
         return try {
             val raw = initStorage(dir)
-            lexicon = intField(raw, "lex").toLong()
+            lexEntries = longField(raw, "lex")
             intField(raw, "saved")
         } catch (_: Exception) {
             0
         }
     }
 
-    /** 词库条目数（0 表示引擎未加载）。 */
     fun lexiconEntries(): Long {
         if (!available) return 0L
-        if (lexicon > 0) return lexicon
-        lexicon = try {
+        if (lexEntries > 0) return lexEntries
+        lexEntries = try {
             lexiconSize().toLongOrNull() ?: 0L
         } catch (_: Exception) {
             0L
         }
-        return lexicon
+        return lexEntries
     }
 
-    /** 同步缓存命中（用于即时渲染），未命中返回 null。 */
     fun cached(pinyin: String): List<String>? = synchronized(cache) { cache[pinyin] }
+
+    /** 完整分析：候选 + 纠错信息（每键调用一次）。 */
+    fun analyze(pinyin: String): Match {
+        if (!available) {
+            return Match(pinyin, false, false, fallbackCandidates(pinyin))
+        }
+        return runCatching { parseMatch(analyzeInput(pinyin), pinyin) }
+            .getOrDefault(Match(pinyin, false, false, fallbackCandidates(pinyin)))
+    }
 
     fun candidates(pinyin: String): List<String> =
         if (!available) fallbackCandidates(pinyin)
@@ -100,20 +158,70 @@ object TypesakeCore {
             list
         }.getOrDefault(fallbackCandidates(pinyin))
 
-    /** 上报选词（词频学习），返回更新后的候选序。 */
-    fun pick(pinyin: String, word: String): List<String> {
+    /** 上报选词（词频学习 + 纠错记忆），返回更新后的候选序。 */
+    fun pick(pinyin: String, word: String, corrected: Boolean = false): List<String> {
         if (!available) return cached(pinyin) ?: fallbackCandidates(pinyin)
         return runCatching {
-            val updated = splitDelim(pickCandidate(pinyin, word))
+            val updated = splitDelim(pickCandidate(pinyin, word, corrected))
             synchronized(cache) { cache[pinyin] = updated }
             updated
         }.getOrDefault(emptyList())
     }
 
-    /** 联想：上一个词的后续词预测。 */
+    /** 置顶（用户主动固定首位）。 */
+    fun pin(pinyin: String, word: String): List<String> {
+        if (!available) return cached(pinyin) ?: fallbackCandidates(pinyin)
+        return runCatching {
+            val updated = splitDelim(pinCandidate(pinyin, word))
+            synchronized(cache) { cache[pinyin] = updated }
+            updated
+        }.getOrDefault(emptyList())
+    }
+
+    /** 删词：该拼音下不再推荐此词。 */
+    fun forget(pinyin: String, word: String): List<String> {
+        if (!available) return cached(pinyin) ?: fallbackCandidates(pinyin)
+        return runCatching {
+            val updated = splitDelim(forgetCandidate(pinyin, word))
+            synchronized(cache) { cache[pinyin] = updated }
+            updated
+        }.getOrDefault(emptyList())
+    }
+
     fun predict(word: String): List<String> =
         if (!available) emptyList()
         else runCatching { splitDelim(predictNext(word)) }.getOrDefault(emptyList())
+
+    /** 写入模糊音/击键纠错开关（会落盘）。 */
+    fun setOptions(fuzzy: Boolean, correction: Boolean) {
+        if (!available) return
+        runCatching { setEngineOptions(fuzzy, correction) }
+        synchronized(cache) { cache.clear() }
+    }
+
+    /** 记一次上屏（词数 + 当天活跃）。 */
+    fun bump(today: String) {
+        if (!available) return
+        runCatching { bumpStats(today) }
+    }
+
+    fun stats(): Stats {
+        if (!available) {
+            return Stats(saved = MemStore.list().size)
+        }
+        return runCatching {
+            val raw = statsInfo()
+            Stats(
+                words = longField(raw, "words"),
+                days = stringArrayField(raw, "days"),
+                saved = intField(raw, "saved"),
+                lex = longField(raw, "lex"),
+                initials = intField(raw, "ini"),
+                fuzzy = boolField(raw, "fuzzy"),
+                correction = boolField(raw, "correction"),
+            )
+        }.getOrDefault(Stats(saved = MemStore.list().size))
+    }
 
     fun suggest(chinese: String): String =
         if (!available) fallbackSuggest(chinese)
@@ -143,7 +251,7 @@ object TypesakeCore {
         if (!available) MemStore.clear()
         else runCatching { intField(clearSaved(), "cleared") }.getOrDefault(MemStore.clear())
 
-    // ---- 无 .so 时的最小兜底（演示/降级，不影响生产路径） ----
+    // ---- 无 .so 时的最小兜底（演示/降级） ----
     private val pinMap = mapOf(
         "nihao" to listOf("你好"), "ni" to listOf("你", "泥", "尼", "呢"),
         "hao" to listOf("好", "号"), "xiexie" to listOf("谢谢"),
@@ -163,6 +271,15 @@ object TypesakeCore {
         val k = p.lowercase().replace(" ", "")
         if (k.isEmpty()) return emptyList()
         pinMap[k]?.let { return it }
+        if (k.length == 2 && k.all { it in "bcdfghjklmnpqrstvwxyz" }) {
+            val expanded = k.map { ch ->
+                pinMap.keys.firstOrNull { it.startsWith(ch) } ?: ""
+            }
+            val phrase = expanded.joinToString("")
+            if (phrase.isNotEmpty()) {
+                pinMap[phrase]?.let { return it }
+            }
+        }
         return pinMap.entries.firstOrNull { it.key.startsWith(k) || k.startsWith(it.key) }?.value
             ?: emptyList()
     }

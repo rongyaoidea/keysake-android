@@ -9,7 +9,7 @@ package com.typesake.app.kb
  * - 数字页、电话页按 inputType 自动切换
  */
 
-enum class KbLayer { LETTERS, SYMBOLS, EMOJI, CLIPBOARD }
+enum class KbLayer { LETTERS, SYMBOLS, EMOJI, CLIPBOARD, PHRASES }
 
 enum class KbKind { QWERTY, NUMBER, PHONE, RAW }
 
@@ -130,6 +130,7 @@ object KbLayouts {
                 action("abc", "ABC", 1.4f, KbAction.ShowLayer(KbLayer.LETTERS)),
                 action("emoji2", "☺", 1f, KbAction.ShowLayer(KbLayer.EMOJI)),
                 action("clip", "📋", 1f, KbAction.ShowLayer(KbLayer.CLIPBOARD)),
+                action("phrases", "📝", 1f, KbAction.ShowLayer(KbLayer.PHRASES)),
                 action("onehand", "⇤", 1.2f, KbAction.OneHandToggle),
                 action("cursor_left", "←", 1f, KbAction.CursorLeft),
                 action("cursor_right", "→", 1f, KbAction.CursorRight),
@@ -198,6 +199,31 @@ object KbLayouts {
     )
 
     fun alternatesFor(label: String): List<String> = ALTERNATES[label.lowercase()] ?: emptyList()
+
+    /** 上滑（手势）插入的字符：数字键 -> 符号，字母 -> 对应数字/重音。 */
+    private val SWIPE_UP_DIGIT: Map<String, String> = mapOf(
+        "1" to "!", "2" to "@", "3" to "#", "4" to "$", "5" to "%",
+        "6" to "^", "7" to "&", "8" to "*", "9" to "(", "0" to ")",
+    )
+    private val SWIPE_UP_LETTER: Map<String, String> = buildMap {
+        // 上排字母上滑 -> 数字（q=1 … p=0），中/下排 -> 常用符号
+        "qwertyuiop".forEachIndexed { i, c -> put(c.toString(), ((i + 1) % 10).toString()) }
+        "asdfghjkl".forEachIndexed { i, c ->
+            put(c.toString(), listOf("@", "#", "-", "_", "+", "=", ";", ":", "/")[i])
+        }
+        "zxcvbnm".forEachIndexed { i, c ->
+            put(c.toString(), listOf("*", "#", "(", ")", "\"", "'", ",")[i])
+        }
+    }
+
+    fun swipeUpFor(label: String): String? {
+        val key = label.lowercase()
+        val digits = SWIPE_UP_DIGIT[key]
+        if (digits != null) return digits
+        val sym = SWIPE_UP_LETTER[key]
+        if (sym != null) return sym
+        return alternatesFor(key).firstOrNull()
+    }
 
     /** 常用 emoji（覆盖表情/手势/生活/办公）。 */
     val EMOJI: List<String> = listOf(

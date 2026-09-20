@@ -1,14 +1,19 @@
 //! JNI 边界。
 //!
 //! 约定：
-//! - 热路径（每键调用）返回 `\u{1F}` 分隔串，避免 JSON 解析开销；
-//! - 冷路径（收藏/初始化）返回 JSON；
-//! - **所有导出函数都经 [`guarded`] 包裹**：Rust panic 不会跨 FFI 传播，
-//!   最坏情况返回空串，绝不连带杀掉输入法进程。
+//! - 热路径（每键调用）返回分隔串而非 JSON：
+//!   `analyzeInput` = `flag<US>matched<US>c1<GS>c2<GS>…`
+//!   （US='\u{1E}' 字段分隔，GS='\u{1F}' 列表分隔，省掉每键 JSON 解析）
+//! - 冷路径（收藏/统计/初始化）返回 JSON；
+//! - **所有导出函数都经 [`guarded`] 包裹**：Rust panic 不跨 FFI，最坏返回空串。
 
-use crate::{engine, english, join_delim, store};
+use crate::{engine, english, store};
 use jni::objects::{JClass, JString};
+use jni::sys::jboolean;
 use jni::JNIEnv;
+
+pub const FIELD: char = '\u{1E}';
+pub const ITEM: char = '\u{1F}';
 
 fn jstr_to_rust(env: &mut JNIEnv, s: &JString) -> String {
     env.get_string(s)
@@ -21,7 +26,6 @@ fn rust_to_jstr<'local>(env: &mut JNIEnv<'local>, s: &str) -> JString<'local> {
         .unwrap_or_else(|_| env.new_string("").expect("empty JString must succeed"))
 }
 
-/// 捕获 panic：FFI 边界不允许 unwind（否则会 abort 进程）。
 fn guarded<F: FnOnce() -> String>(f: F) -> String {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_default()
 }
@@ -37,6 +41,32 @@ fn err_json(e: &str) -> String {
     )
 }
 
+fn join(items: &[String]) -> String {
+    items.join(&ITEM.to_string())
+}
+
+/// 候选分析：flag(0=直接 1=纠错 2=纠错记忆) + matched + 候选列表。
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_analyzeInput<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    input: JString<'local>,
+) -> JString<'local> {
+    let s = jstr_to_rust(&mut env, &input);
+    let out = guarded(|| {
+        let m = engine::analyze(&s, 8);
+        let flag = if m.remembered {
+            "2"
+        } else if m.corrected {
+            "1"
+        } else {
+            "0"
+        };
+        format!("{flag}{FIELD}{}{FIELD}{}", m.matched, join(&m.candidates))
+    });
+    rust_to_jstr(&mut env, &out)
+}
+
 #[no_mangle]
 pub extern "system" fn Java_com_typesake_app_TypesakeCore_initStorage<'local>(
     mut env: JNIEnv<'local>,
@@ -45,10 +75,12 @@ pub extern "system" fn Java_com_typesake_app_TypesakeCore_initStorage<'local>(
 ) -> JString<'local> {
     let dir = jstr_to_rust(&mut env, &jdir);
     let out = guarded(|| match store::init(&dir) {
-        Ok((saved, pins)) => ok_json(&format!(
-            "\"saved\":{saved},\"pins\":{pins},\"lex\":{}",
-            engine::lexicon_size()
-        )),
+        Ok((saved, pins)) => {
+            let (lex, ini) = engine::lexicon_info();
+            ok_json(&format!(
+                "\"saved\":{saved},\"pins\":{pins},\"lex\":{lex},\"ini\":{ini}"
+            ))
+        }
         Err(e) => err_json(&e),
     });
     rust_to_jstr(&mut env, &out)
@@ -70,7 +102,7 @@ pub extern "system" fn Java_com_typesake_app_TypesakeCore_candidatesFor<'local>(
     input: JString<'local>,
 ) -> JString<'local> {
     let s = jstr_to_rust(&mut env, &input);
-    let out = guarded(|| join_delim(&engine::candidates(&s, 8)));
+    let out = guarded(|| join(&engine::candidates(&s, 8)));
     rust_to_jstr(&mut env, &out)
 }
 
@@ -80,13 +112,52 @@ pub extern "system" fn Java_com_typesake_app_TypesakeCore_pickCandidate<'local>(
     _class: JClass<'local>,
     jpinyin: JString<'local>,
     jword: JString<'local>,
+    corrected: jboolean,
+) -> JString<'local> {
+    let p = jstr_to_rust(&mut env, &jpinyin);
+    let w = jstr_to_rust(&mut env, &jword);
+    let was_corrected = corrected != 0;
+    let out = guarded(|| {
+        if was_corrected {
+            engine::remember(&p, &w);
+        }
+        let updated = engine::record_pick(&p, &w, 8);
+        let _ = store::persist();
+        join(&updated)
+    });
+    rust_to_jstr(&mut env, &out)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_pinCandidate<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    jpinyin: JString<'local>,
+    jword: JString<'local>,
 ) -> JString<'local> {
     let p = jstr_to_rust(&mut env, &jpinyin);
     let w = jstr_to_rust(&mut env, &jword);
     let out = guarded(|| {
-        let updated = engine::record_pick(&p, &w, 8);
-        let _ = store::persist_l0();
-        join_delim(&updated)
+        let updated = engine::pin(&p, &w, 8);
+        let _ = store::persist();
+        join(&updated)
+    });
+    rust_to_jstr(&mut env, &out)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_forgetCandidate<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    jpinyin: JString<'local>,
+    jword: JString<'local>,
+) -> JString<'local> {
+    let p = jstr_to_rust(&mut env, &jpinyin);
+    let w = jstr_to_rust(&mut env, &jword);
+    let out = guarded(|| {
+        let updated = engine::forget(&p, &w, 8);
+        let _ = store::persist();
+        join(&updated)
     });
     rust_to_jstr(&mut env, &out)
 }
@@ -98,7 +169,53 @@ pub extern "system" fn Java_com_typesake_app_TypesakeCore_predictNext<'local>(
     jword: JString<'local>,
 ) -> JString<'local> {
     let w = jstr_to_rust(&mut env, &jword);
-    let out = guarded(|| join_delim(&engine::predict_next(&w, 6)));
+    let out = guarded(|| join(&engine::predict_next(&w, 6)));
+    rust_to_jstr(&mut env, &out)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_setEngineOptions<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    fuzzy: jboolean,
+    correction: jboolean,
+) -> JString<'local> {
+    let out = guarded(|| match store::set_settings(fuzzy != 0, correction != 0) {
+        Ok(()) => ok_json("\"saved\":1"),
+        Err(e) => err_json(&e),
+    });
+    rust_to_jstr(&mut env, &out)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_bumpStats<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    jtoday: JString<'local>,
+) -> JString<'local> {
+    let today = jstr_to_rust(&mut env, &jtoday);
+    let out = guarded(|| match store::bump_stats(1, &today) {
+        Ok(()) => ok_json(&format!("\"words\":{}", store::stats().words)),
+        Err(e) => err_json(&e),
+    });
+    rust_to_jstr(&mut env, &out)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_statsInfo<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> JString<'local> {
+    let out = guarded(|| {
+        let st = store::stats();
+        let (lex, ini) = engine::lexicon_info();
+        let (fuzzy, correction) = engine::options();
+        let days = serde_json::to_string(&st.days).unwrap_or_else(|_| "[]".into());
+        ok_json(&format!(
+            "\"words\":{},\"days\":{},\"saved\":{},\"lex\":{},\"ini\":{},\"fuzzy\":{},\"correction\":{}",
+            st.words, days, store::saved_count(), lex, ini, fuzzy, correction
+        ))
+    });
     rust_to_jstr(&mut env, &out)
 }
 
@@ -120,7 +237,7 @@ pub extern "system" fn Java_com_typesake_app_TypesakeCore_englishCandidates<'loc
     input: JString<'local>,
 ) -> JString<'local> {
     let s = jstr_to_rust(&mut env, &input);
-    let out = guarded(|| join_delim(&english::english_candidates(&s)));
+    let out = guarded(|| join(&english::english_candidates(&s)));
     rust_to_jstr(&mut env, &out)
 }
 

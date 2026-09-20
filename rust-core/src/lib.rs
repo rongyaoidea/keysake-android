@@ -11,7 +11,18 @@
 pub mod engine;
 pub mod english;
 pub mod ffi;
+pub mod initials;
 pub mod store;
+
+/// 测试用的全局串行锁：多个模块的用例都会动全局引擎状态（选项/学习/删词），
+/// 并行跑会互相污染，统一用这把锁串行化。
+#[cfg(test)]
+pub(crate) fn test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static L: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    L.get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
 
 /// 热路径列表分隔符（Unit Separator），比 JSON 便宜且无转义问题。
 pub const DELIM: char = '\u{1F}';
