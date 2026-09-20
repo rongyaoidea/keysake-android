@@ -413,14 +413,17 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
 
     /** 玻璃皮肤下面板用圆角+描边；普通皮肤仍用纯色。 */
     private fun applyBarBackground(view: android.view.View) {
+        // 注意：GradientDrawable 自身也有 colors 属性，apply 里必须用提前取好的局部变量
+        val barBg = colors.barBg
+        val border = colors.glassBorder
         if (colors.glass) {
             view.background = GradientDrawable().apply {
-                setColor(colors.barBg)
+                setColor(barBg)
                 cornerRadius = dp(14).toFloat()
-                setStroke(dp(1), colors.glassBorder)
+                setStroke(dp(1), border)
             }
         } else {
-            view.setBackgroundColor(colors.barBg)
+            view.setBackgroundColor(barBg)
         }
     }
 
