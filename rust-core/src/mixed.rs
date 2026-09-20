@@ -60,6 +60,11 @@ struct Step {
     prev: usize,
 }
 
+/// 首字母 -> 候选单字缓存
+type CharCache = Mutex<HashMap<char, Vec<(String, u64)>>>;
+/// 声母串 -> 候选词缓存
+type RunCache = Mutex<HashMap<String, Vec<(String, u64)>>>;
+
 fn common_bonus(word: &str) -> f64 {
     if initials::is_common(word) {
         COMMON_BONUS
@@ -115,8 +120,8 @@ fn word_freq(eng: &PinyinEngine, word: &str) -> u64 {
 
 /// 首字母 -> 最高频单字（缓存；一次 prefix 扫描约 1–2ms）
 fn chars_for_initial(eng: &PinyinEngine, letter: char, k: usize) -> Vec<(String, u64)> {
-    fn cache() -> &'static Mutex<HashMap<char, Vec<(String, u64)>>> {
-        static C: OnceLock<Mutex<HashMap<char, Vec<(String, u64)>>>> = OnceLock::new();
+    fn cache() -> &'static CharCache {
+        static C: OnceLock<CharCache> = OnceLock::new();
         C.get_or_init(|| Mutex::new(HashMap::new()))
     }
     if let Ok(c) = cache().lock() {
@@ -141,8 +146,8 @@ fn chars_for_initial(eng: &PinyinEngine, letter: char, k: usize) -> Vec<(String,
 
 /// 声母串候选（带词频）：拼音词典简拼索引 + lex 声母串索引（词频反查），按词频+常用词排序
 fn run_candidates(eng: &PinyinEngine, run: &str, k: usize) -> Vec<(String, u64)> {
-    fn cache() -> &'static Mutex<HashMap<String, Vec<(String, u64)>>> {
-        static C: OnceLock<Mutex<HashMap<String, Vec<(String, u64)>>>> = OnceLock::new();
+    fn cache() -> &'static RunCache {
+        static C: OnceLock<RunCache> = OnceLock::new();
         C.get_or_init(|| Mutex::new(HashMap::new()))
     }
     if let Ok(c) = cache().lock() {
@@ -266,7 +271,7 @@ fn parse_chains(eng: &PinyinEngine, input: &str) -> Vec<Vec<(usize, Kind)>> {
                 });
             }
         }
-        cands.sort_by(|a, b| b.score.cmp(&a.score));
+        cands.sort_by_key(|a| std::cmp::Reverse(a.score));
         let mut sigs: Vec<u64> = Vec::new();
         for c in cands {
             if sigs.contains(&c.sig) {
