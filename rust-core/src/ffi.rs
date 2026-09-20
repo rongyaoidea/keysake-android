@@ -478,7 +478,7 @@ pub extern "system" fn Java_com_typesake_app_TypesakeCore_statsInfo<'local>(
         let (fuzzy, correction, shuangpin) = engine::options();
         let days = serde_json::to_string(&st.days).unwrap_or_else(|_| "[]".into());
         ok_json(&format!(
-            "\"words\":{},\"days\":{},\"saved\":{},\"lex\":{},\"ini\":{},\"endict\":{},\"biglex\":{},\"fuzzy\":{},\"correction\":{},\"shuangpin\":{},\"script\":{},\"err\":{}",
+            "\"words\":{},\"days\":{},\"saved\":{},\"lex\":{},\"ini\":{},\"endict\":{},\"biglex\":{},\"sentbank\":{},\"fuzzy\":{},\"correction\":{},\"shuangpin\":{},\"script\":{},\"err\":{}",
             st.words,
             days,
             store::saved_count(),
@@ -486,6 +486,7 @@ pub extern "system" fn Java_com_typesake_app_TypesakeCore_statsInfo<'local>(
             ini,
             english::dict_size(),
             engine::biglex_size(),
+            crate::sentbank::size(),
             fuzzy,
             correction,
             shuangpin,

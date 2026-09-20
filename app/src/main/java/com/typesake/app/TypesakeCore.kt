@@ -33,6 +33,7 @@ object TypesakeCore {
                 KIND_NATIVE -> "地道"
                 KIND_PATTERN -> "结构"
                 KIND_LITERAL -> "直译"
+                KIND_SENTBANK -> "句库"
                 else -> ""
             }
     }
@@ -45,6 +46,7 @@ object TypesakeCore {
         val initials: Int = 0,
         val endict: Int = 0,
         val biglex: Int = 0,
+        val sentbank: Int = 0,
         val shuangpin: Int = 0,
         val lastError: String = "",
         val fuzzy: Boolean = true,
@@ -59,6 +61,7 @@ object TypesakeCore {
     const val KIND_NATIVE = "2"
     const val KIND_PATTERN = "3"
     const val KIND_LITERAL = "4"
+    const val KIND_SENTBANK = "6"
     private const val CACHE_MAX = 64
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -383,6 +386,7 @@ object TypesakeCore {
                 initials = intField(raw, "ini"),
                 endict = intField(raw, "endict"),
                 biglex = intField(raw, "biglex"),
+                sentbank = intField(raw, "sentbank"),
                 shuangpin = intField(raw, "shuangpin"),
                 lastError = stringField(raw, "err"),
                 fuzzy = boolField(raw, "fuzzy"),

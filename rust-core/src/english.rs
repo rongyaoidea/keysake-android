@@ -18,6 +18,8 @@ pub const KIND_PATTERN: u8 = 3;
 pub const KIND_LITERAL: u8 = 4;
 /// 大词典（CC-CEDICT）整词命中
 pub const KIND_DICT: u8 = 5;
+/// 句库（Tatoeba 整句/重叠命中）
+pub const KIND_SENTBANK: u8 = 6;
 
 /// 整句/整词 -> 地道英文（口语与常用书面语，含商务与学习场景）。
 const PHRASES: &[(&str, &str)] = &[
@@ -1385,6 +1387,11 @@ pub fn english_candidates(text: &str) -> Vec<(u8, String)> {
     // 2) 地道整句
     if let Some((_, en)) = PHRASES.iter().find(|(cn, _)| *cn == t) {
         push(&mut out, KIND_NATIVE, (*en).to_string());
+    }
+
+    // 2.2) 句库（整句精确 / 双字重叠 ≥60%）
+    for (en, _score) in crate::sentbank::lookup(t, 2) {
+        push(&mut out, KIND_SENTBANK, en);
     }
 
     // 2.5) 大词典整词命中（CC-CEDICT）

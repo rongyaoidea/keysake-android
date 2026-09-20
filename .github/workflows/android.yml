@@ -106,6 +106,19 @@ jobs:
             --input /tmp/jieba_dict.txt --out app/src/main/assets/lex.bin
           ls -lh app/src/main/assets/lex.bin
 
+      # 句库（可选）：Tatoeba 中英对齐句对 -> sentbank.bin（失败不阻塞）
+      - name: Build sentence bank (optional)
+        continue-on-error: true
+        run: |
+          curl -sSL --max-time 180 -o /tmp/tatoeba.zip \
+            https://object.pouta.csc.fi/OPUS-Tatoeba/v2023-04-12/moses/en-zh_cn.txt.zip
+          unzip -o -q /tmp/tatoeba.zip -d /tmp/tatoeba
+          python3 tools/gen_sentbank.py \
+            --en /tmp/tatoeba/Tatoeba.en-zh_cn.en \
+            --zh /tmp/tatoeba/Tatoeba.en-zh_cn.zh_cn \
+            --out app/src/main/assets/sentbank.bin
+          ls -lh app/src/main/assets/sentbank.bin
+
       - name: Install cargo-ndk
         continue-on-error: true
         run: cargo install cargo-ndk --locked
