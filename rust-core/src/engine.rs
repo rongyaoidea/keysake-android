@@ -703,6 +703,30 @@ pub fn forget(pinyin: &str, word: &str, limit: usize) -> Vec<String> {
     candidates_with(engine(), &compact, limit)
 }
 
+/// 用户词库视图：(拼音, 词, 选词次数)。pin 的 count 记为 0（表示已固定首位）。
+pub fn learned_words() -> Vec<(String, String, u32)> {
+    let snap = export_l0();
+    let mut out: Vec<(String, String, u32)> = Vec::new();
+    for (p, w) in snap.pins {
+        out.push((p, w, 0));
+    }
+    for (p, w, c) in snap.pick_counts {
+        if !out.iter().any(|(pp, ww, _)| pp == &p && ww == &w) {
+            out.push((p, w, c));
+        }
+    }
+    out.sort();
+    out
+}
+
+/// 清空学习记录（置顶与选词计数），保留收藏。
+pub fn clear_learned() -> usize {
+    let n = learned_words().len();
+    import_l0(Vec::new(), Vec::new());
+    t9::clear_cache();
+    n
+}
+
 pub fn export_l0() -> L0Snapshot {
     engine().dict().export_l0()
 }

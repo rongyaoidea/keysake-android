@@ -1,5 +1,7 @@
 package com.typesake.app
 
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
@@ -91,7 +93,10 @@ private fun SetupScreen(paletteId: Int, readyTick: Int, onPaletteChange: (Int) -
     var fuzzy by remember { mutableStateOf(prefs.fuzzy) }
     var correction by remember { mutableStateOf(prefs.correction) }
     var statTick by remember { mutableIntStateOf(readyTick) }
+    var tick by remember { mutableIntStateOf(readyTick) }
     var shuangpin by remember { mutableIntStateOf(prefs.shuangpin) }
+    var words by remember(tick) { mutableStateOf(TypesakeCore.myWords()) }
+    val context = LocalContext.current
     var t9 by remember { mutableStateOf(prefs.t9Layout) }
     var trial by remember { mutableStateOf("") }
     var savedFlash by remember { mutableStateOf("") }
@@ -190,6 +195,66 @@ private fun SetupScreen(paletteId: Int, readyTick: Int, onPaletteChange: (Int) -
         }
 
         Spacer(Modifier.height(4.dp))
+        Text("我的词库（${words.size}）", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "连续选同一个词 3 次会自动置顶；这里可以删除或清空学习记录。",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        GlassCard {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (words.isEmpty()) {
+                    Text("还没有学习记录：多打几个词，或长按候选「置顶」。", style = MaterialTheme.typography.bodySmall)
+                }
+                words.take(12).forEach { w ->
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            "${w.pinyin} → ${w.word}" + if (w.picks == 0) "（置顶）" else "（${w.picks} 次）",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            "删除",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.clickable {
+                                TypesakeCore.forget(w.pinyin, w.word)
+                                words = TypesakeCore.myWords()
+                            },
+                        )
+                    }
+                }
+                if (words.size > 12) {
+                    Text("…还有 ${words.size - 12} 条", style = MaterialTheme.typography.bodySmall)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = {
+                        TypesakeCore.resetLearning()
+                        words = TypesakeCore.myWords()
+                        savedFlash = "已清空学习记录"
+                    }) { Text("清空学习记录") }
+                    OutlinedButton(onClick = {
+                        val json = TypesakeCore.backupJson()
+                        if (json.isNotEmpty()) {
+                            val send = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_TEXT, json)
+                            }
+                            context.startActivity(Intent.createChooser(send, "备份词库"))
+                        }
+                    }) { Text("分享备份") }
+                    OutlinedButton(onClick = {
+                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                        val text = cm?.primaryClip?.takeIf { it.itemCount > 0 }
+                            ?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+                        val ok = TypesakeCore.restoreJson(text)
+                        words = TypesakeCore.myWords()
+                        savedFlash = if (ok) "已从剪贴板恢复词库" else "剪贴板里没有可用的备份 JSON"
+                    }) { Text("剪贴板恢复") }
+                }
+            }
+        }
+
         Text("键盘设置", style = MaterialTheme.typography.titleMedium)
         Text("主题", style = MaterialTheme.typography.bodyMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

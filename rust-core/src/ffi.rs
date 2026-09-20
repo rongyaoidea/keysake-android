@@ -280,6 +280,61 @@ pub extern "system" fn Java_com_typesake_app_TypesakeCore_bumpStats<'local>(
     rust_to_jstr(&mut env, &out)
 }
 
+/// 用户词库列表：`拼音<RS>词<RS>次数` 列表（次数 0 = 已固定首位）。
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_learnedWords<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> JString<'local> {
+    let out = guarded(|| {
+        let items: Vec<String> = engine::learned_words()
+            .into_iter()
+            .map(|(p, w, c)| format!("{p}\u{1D}{w}\u{1D}{c}"))
+            .collect();
+        join(&items)
+    });
+    rust_to_jstr(&mut env, &out)
+}
+
+/// 清空学习记录（置顶与选词计数）。
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_clearLearned<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> JString<'local> {
+    let out = guarded(|| {
+        let n = engine::clear_learned();
+        let _ = store::persist();
+        ok_json(&format!("\"cleared\":{n}"))
+    });
+    rust_to_jstr(&mut env, &out)
+}
+
+/// 本地备份：导出整库 JSON。
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_exportBackup<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> JString<'local> {
+    let out = guarded(|| store::export_json().unwrap_or_default());
+    rust_to_jstr(&mut env, &out)
+}
+
+/// 本地恢复：从 JSON 覆盖导入。
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_importBackup<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    jtext: JString<'local>,
+) -> JString<'local> {
+    let text = jstr_to_rust(&mut env, &jtext);
+    let out = guarded(|| match store::import_json(&text) {
+        Ok((saved, pins)) => ok_json(&format!("\"saved\":{saved},\"pins\":{pins}")),
+        Err(e) => err_json(&e),
+    });
+    rust_to_jstr(&mut env, &out)
+}
+
 #[no_mangle]
 pub extern "system" fn Java_com_typesake_app_TypesakeCore_statsInfo<'local>(
     mut env: JNIEnv<'local>,

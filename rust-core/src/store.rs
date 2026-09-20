@@ -341,6 +341,42 @@ pub fn clear_saved() -> Result<usize, String> {
     Ok(n)
 }
 
+/// 导出整库 JSON（本地备份，无网络无权限）。
+pub fn export_json() -> Result<String, String> {
+    let s = store().lock().map_err(|e| e.to_string())?;
+    let l0 = engine::export_l0();
+    let db = Db {
+        version: 3,
+        saved: s.saved.clone(),
+        l0: L0File {
+            pins: l0.pins,
+            pick_counts: l0.pick_counts,
+        },
+        settings: s.settings.clone(),
+        stats: s.stats.clone(),
+        corrections: engine::export_learned()
+            .into_iter()
+            .map(|(typed, word, count)| Correction { typed, word, count })
+            .collect(),
+        blocked: engine::export_blocked(),
+    };
+    serde_json::to_string_pretty(&db).map_err(|e| e.to_string())
+}
+
+/// 从 JSON 恢复整库（覆盖当前数据），返回 (收藏数, pins 数)。
+pub fn import_json(text: &str) -> Result<(usize, usize), String> {
+    serde_json::from_str::<Db>(text).map_err(|e| format!("JSON 解析失败：{e}"))?;
+    let dir = {
+        let s = store().lock().map_err(|e| e.to_string())?;
+        s.dir.clone()
+    };
+    if dir.is_empty() {
+        return Err("存储目录未初始化".to_string());
+    }
+    write_atomic(&db_path(&dir), text.as_bytes()).map_err(|e| e.to_string())?;
+    init(&dir)
+}
+
 /// 学习/设置数据落盘（选词、纠错记忆后调用）。
 pub fn persist() -> Result<(), String> {
     let s = store().lock().map_err(|e| e.to_string())?;
@@ -453,6 +489,50 @@ mod tests {
         assert!(delete_saved("你好", "Hi there!").unwrap());
         assert!(list_saved().is_empty());
         assert!(update_saved("你好", "x", "  ").is_err());
+    }
+
+    #[test]
+    fn backup_roundtrip() {
+        let _g = lock();
+        let dir = tmp_dir("backup");
+        init(&dir).unwrap();
+        save_phrase("你好", "Hello!").unwrap();
+        bump_stats(5, "2026-09-20").unwrap();
+        engine::remember("nihap", "你好");
+        let json = export_json().unwrap();
+        assert!(json.contains("Hello!"));
+
+        // 清空后再导入恢复
+        clear_saved().unwrap();
+        assert!(list_saved().is_empty());
+        let (saved, _pins) = import_json(&json).unwrap();
+        assert_eq!(saved, 1);
+        assert_eq!(list_saved()[0].english, "Hello!");
+        assert!(engine::export_learned()
+            .iter()
+            .any(|(t, w, _)| t == "nihap" && w == "你好"));
+        assert_eq!(stats().words, 5);
+
+        assert!(import_json("{oops").is_err());
+    }
+
+    #[test]
+    fn learned_words_and_clear() {
+        let _g = lock();
+        let dir = tmp_dir("learned");
+        init(&dir).unwrap();
+        engine::clear_learned();
+        let cands = engine::candidates_with(engine::engine(), "ni", 8);
+        let target = cands.iter().find(|w| w.as_str() != "你").cloned().unwrap();
+        for _ in 0..3 {
+            engine::record_pick("ni", &target, 8);
+        }
+        let words = engine::learned_words();
+        assert!(words
+            .iter()
+            .any(|(p, w, c)| p == "ni" && w == &target && *c == 0));
+        engine::clear_learned();
+        assert!(engine::learned_words().is_empty());
     }
 
     #[test]

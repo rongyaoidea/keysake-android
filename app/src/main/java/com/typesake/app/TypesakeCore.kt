@@ -96,6 +96,10 @@ object TypesakeCore {
     @JvmStatic private external fun t9Candidates(digits: String): String
     @JvmStatic private external fun updateSaved(chinese: String, oldEnglish: String, newEnglish: String): String
     @JvmStatic private external fun deleteSaved(chinese: String, english: String): String
+    @JvmStatic private external fun learnedWords(): String
+    @JvmStatic private external fun clearLearned(): String
+    @JvmStatic private external fun exportBackup(): String
+    @JvmStatic private external fun importBackup(text: String): String
     @JvmStatic private external fun bumpStats(today: String): String
     @JvmStatic private external fun statsInfo(): String
     @JvmStatic private external fun suggestEnglish(chinese: String): String
@@ -245,6 +249,40 @@ object TypesakeCore {
         if (!available) return MemStore.update(chinese, oldEnglish, newEnglish)
         return runCatching { intField(updateSaved(chinese, oldEnglish, newEnglish), "updated") == 1 }
             .getOrDefault(false)
+    }
+
+    /** 用户词库条目：拼音 / 词 / 选词次数（0 = 已固定首位）。 */
+    data class LearnedWord(val pinyin: String, val word: String, val picks: Int)
+
+    /** 用户词库列表（本地学习记录）。注意与 JNI 同名，故公开 API 另行命名。 */
+    fun myWords(): List<LearnedWord> {
+        if (!available) return emptyList()
+        return runCatching {
+            splitDelim(learnedWords()).mapNotNull { item ->
+                val parts = item.split(RS)
+                if (parts.size < 2) null else LearnedWord(
+                    parts[0],
+                    parts[1],
+                    parts.getOrNull(2)?.toIntOrNull() ?: 0,
+                )
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    /** 清空学习记录（保留收藏）。 */
+    fun resetLearning(): Int {
+        if (!available) return 0
+        return runCatching { intField(clearLearned(), "cleared") }.getOrDefault(0)
+    }
+
+    /** 本地备份：整库 JSON（可分享/保存）。 */
+    fun backupJson(): String =
+        if (!available) "" else runCatching { exportBackup() }.getOrDefault("")
+
+    /** 本地恢复：从 JSON 覆盖导入。 */
+    fun restoreJson(text: String): Boolean {
+        if (!available || text.isBlank()) return false
+        return runCatching { !importBackup(text).contains("\"ok\":false") }.getOrDefault(false)
     }
 
     /** 删除单条收藏。 */
