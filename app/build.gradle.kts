@@ -22,6 +22,10 @@ android {
         targetSdk = 34
         versionCode = versionCodeOverride
         versionName = versionNameOverride
+        // 只打包我们真正构建的 ABI，避免依赖带入 x86 等杂项 .so
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
+        }
     }
 
     signingConfigs {

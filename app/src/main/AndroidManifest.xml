@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- 隐私护城河：不申请任何用户权限。DUMP 由依赖（profileinstaller 等）
+         带进来，属签名级权限、普通应用永远不会被授予，这里显式移除，
+         保证发布包权限表只剩系统强制的 BIND_INPUT_METHOD。 -->
+    <uses-permission android:name="android.permission.DUMP" tools:node="remove" />
 
     <application
         android:allowBackup="true"
