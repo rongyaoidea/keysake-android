@@ -13,6 +13,7 @@ pub mod engine;
 pub mod english;
 pub mod ffi;
 pub mod initials;
+pub mod mixed;
 pub mod s2t;
 pub mod sentbank;
 pub mod shuangpin;

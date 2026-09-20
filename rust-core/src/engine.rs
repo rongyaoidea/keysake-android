@@ -11,7 +11,7 @@
 //!
 //! 4–7 只在前面完全无结果时触发，避免误纠。
 
-use crate::{biglex, initials, shuangpin, t9};
+use crate::{biglex, initials, mixed, shuangpin, t9};
 use inputx_pinyin::{L0Snapshot, PinyinEngine};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -135,6 +135,13 @@ pub fn more_candidates(input: &str, limit: usize) -> Vec<String> {
         return Vec::new();
     }
     let mut out = filter_blocked(&compact, candidates_with(engine(), &compact, limit));
+    if out.len() < limit {
+        for w in mixed::compose(engine(), &compact, limit) {
+            if !out.contains(&w) {
+                out.push(w);
+            }
+        }
+    }
     if out.len() < limit {
         for w in compose_long(engine(), &compact, limit) {
             if !out.contains(&w) {
@@ -483,6 +490,13 @@ pub fn candidates_with(eng: &PinyinEngine, input: &str, limit: usize) -> Vec<Str
     // 长句（>24 字母）：按音节切块组合（引擎单次上限 30 字母）
     if out.len() < limit {
         for w in compose_long(eng, &compact, limit) {
+            push_unique(&mut out, w, limit);
+        }
+    }
+
+    // 混简拼（全拼 + 单字母缩写）：仅在纯全拼没结果时兜底
+    if out.is_empty() {
+        for w in mixed::compose(eng, &compact, limit) {
             push_unique(&mut out, w, limit);
         }
     }
