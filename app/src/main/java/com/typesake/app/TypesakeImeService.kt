@@ -65,7 +65,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     private var match: TypesakeCore.Match? = null
     private var candidates: List<String> = emptyList()
     private var predictions: List<String> = emptyList()
-    private var englishChips: List<String> = emptyList()
+    private var englishChips: List<TypesakeCore.EnglishOption> = emptyList()
     private var lastCommittedChinese: String = ""
     private var phrases: List<Triple<String, String, Long>> = emptyList()
 
@@ -310,14 +310,19 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
                 )
             )
         } else {
-            for (text in englishChips) {
+            for (option in englishChips) {
+                val label = if (option.kindLabel.isEmpty()) {
+                    option.text
+                } else {
+                    "${option.kindLabel}｜${option.text}"
+                }
                 englishRow.addView(
                     chip(
-                        text,
+                        label,
                         colors.barText,
                         colors.key,
-                        onClick = { insertEnglish(text) },
-                        onLongClick = { replaceLastChineseWith(text) },
+                        onClick = { insertEnglish(option.text) },
+                        onLongClick = { replaceLastChineseWith(option.text) },
                     )
                 )
             }
@@ -549,9 +554,9 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     private fun renderComposingEnglish(list: List<String>) {
         if (englishChips.isNotEmpty()) return
         val target = list.firstOrNull() ?: return
-        val en = TypesakeCore.suggest(target)
-        if (en.isNotEmpty()) {
-            englishChips = listOf(en)
+        val list = TypesakeCore.englishList(target)
+        if (list.isNotEmpty()) {
+            englishChips = list
             renderEnglish()
         }
     }

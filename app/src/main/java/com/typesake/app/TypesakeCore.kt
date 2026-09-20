@@ -25,6 +25,18 @@ object TypesakeCore {
         val candidates: List<String>,
     )
 
+    /** 英文候选：来源标签（我的/地道/结构/直译）+ 文本。 */
+    data class EnglishOption(val kind: String, val text: String) {
+        val kindLabel: String
+            get() = when (kind) {
+                KIND_MINE -> "我的"
+                KIND_NATIVE -> "地道"
+                KIND_PATTERN -> "结构"
+                KIND_LITERAL -> "直译"
+                else -> ""
+            }
+    }
+
     data class Stats(
         val words: Long = 0L,
         val days: List<String> = emptyList(),
@@ -37,6 +49,12 @@ object TypesakeCore {
 
     private const val DELIM = '\u001F'
     private const val FIELD = '\u001E'
+    private const val RS = '\u001D'
+
+    const val KIND_MINE = "1"
+    const val KIND_NATIVE = "2"
+    const val KIND_PATTERN = "3"
+    const val KIND_LITERAL = "4"
     private const val CACHE_MAX = 64
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -227,9 +245,20 @@ object TypesakeCore {
         if (!available) fallbackSuggest(chinese)
         else runCatching { suggestEnglish(chinese) }.getOrDefault(fallbackSuggest(chinese))
 
-    fun englishList(chinese: String): List<String> =
-        if (!available) fallbackSuggest(chinese).takeIf { it.isNotEmpty() }?.let { listOf(it) } ?: emptyList()
-        else runCatching { splitDelim(englishCandidates(chinese)) }.getOrDefault(emptyList())
+    /** 解析 `kind<RS>text` 列表。 */
+    internal fun parseEnglish(raw: String): List<EnglishOption> =
+        splitDelim(raw).mapNotNull { item ->
+            val i = item.indexOf(RS)
+            if (i <= 0) null else EnglishOption(item.substring(0, i), item.substring(i + 1))
+        }
+
+    fun englishList(chinese: String): List<EnglishOption> {
+        if (!available) {
+            return fallbackSuggest(chinese).takeIf { it.isNotEmpty() }
+                ?.let { listOf(EnglishOption(KIND_NATIVE, it)) } ?: emptyList()
+        }
+        return runCatching { parseEnglish(englishCandidates(chinese)) }.getOrDefault(emptyList())
+    }
 
     fun explain(english: String): String =
         if (!available) fallbackExplain(english)

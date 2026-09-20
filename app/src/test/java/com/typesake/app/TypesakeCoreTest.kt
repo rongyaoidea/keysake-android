@@ -66,6 +66,28 @@ class TypesakeCoreTest {
     }
 
     @Test
+    fun englishOptionParsing() {
+        val raw = "2\u001DPlease send the report.\u001F3\u001DPlease send report.\u001F4\u001DI send report."
+        val list = TypesakeCore.parseEnglish(raw)
+        assertEquals(3, list.size)
+        assertEquals("地道", list[0].kindLabel)
+        assertEquals("Please send the report.", list[0].text)
+        assertEquals("结构", list[1].kindLabel)
+        assertEquals("直译", list[2].kindLabel)
+        assertTrue(TypesakeCore.parseEnglish("").isEmpty())
+        // 没有来源前缀的脏数据被安全丢弃
+        assertTrue(TypesakeCore.parseEnglish("garbage").isEmpty())
+    }
+
+    @Test
+    fun fallbackEnglishListIsLabelled() {
+        val list = TypesakeCore.englishList("谢谢")
+        assertEquals(1, list.size)
+        assertEquals("地道", list[0].kindLabel)
+        assertEquals("Thank you!", list[0].text)
+    }
+
+    @Test
     fun statsFallbackIsEmpty() {
         val s = TypesakeCore.stats()
         assertEquals(0L, s.words)

@@ -230,6 +230,7 @@ pub extern "system" fn Java_com_typesake_app_TypesakeCore_suggestEnglish<'local>
     rust_to_jstr(&mut env, &out)
 }
 
+/// 英文候选：每项形如 `kind<RS>text`（RS='\u{1D}'），按优先级排序。
 #[no_mangle]
 pub extern "system" fn Java_com_typesake_app_TypesakeCore_englishCandidates<'local>(
     mut env: JNIEnv<'local>,
@@ -237,7 +238,13 @@ pub extern "system" fn Java_com_typesake_app_TypesakeCore_englishCandidates<'loc
     input: JString<'local>,
 ) -> JString<'local> {
     let s = jstr_to_rust(&mut env, &input);
-    let out = guarded(|| join(&english::english_candidates(&s)));
+    let out = guarded(|| {
+        let items: Vec<String> = english::english_candidates(&s)
+            .into_iter()
+            .map(|(kind, text)| format!("{kind}\u{1D}{text}"))
+            .collect();
+        join(&items)
+    });
     rust_to_jstr(&mut env, &out)
 }
 

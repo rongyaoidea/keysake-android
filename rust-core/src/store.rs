@@ -2,7 +2,7 @@
 //!
 //! 原子写：先写 `<file>.json.tmp` 再 `rename`，避免进程被杀时留下半截 JSON。
 
-use crate::engine;
+use crate::{engine, english};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -128,6 +128,16 @@ fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
     std::fs::rename(&tmp, path)
 }
 
+/// 把收藏句子灌进英文翻译记忆（用户自己的表达最优先）。
+fn sync_memory(items: &[SavedPhrase]) {
+    english::set_memory(
+        items
+            .iter()
+            .map(|p| (p.chinese.clone(), p.english.clone()))
+            .collect(),
+    );
+}
+
 fn write_db_locked(s: &Store) -> Result<(), String> {
     let l0 = engine::export_l0();
     let corrections: Vec<Correction> = engine::export_learned()
@@ -184,6 +194,7 @@ pub fn init(dir: &str) -> Result<(usize, usize), String> {
     s.saved = db.saved;
     s.settings = db.settings;
     s.stats = db.stats;
+    sync_memory(&s.saved);
     Ok((s.saved.len(), pins))
 }
 
@@ -249,6 +260,7 @@ pub fn save_phrase(chinese: &str, english: &str) -> Result<SavedPhrase, String> 
     };
     s.saved.push(p.clone());
     write_db_locked(&s)?;
+    sync_memory(&s.saved);
     Ok(p)
 }
 
@@ -263,6 +275,7 @@ pub fn clear_saved() -> Result<usize, String> {
     let n = s.saved.len();
     s.saved.clear();
     write_db_locked(&s)?;
+    sync_memory(&s.saved);
     Ok(n)
 }
 
