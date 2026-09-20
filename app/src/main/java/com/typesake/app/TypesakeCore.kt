@@ -101,6 +101,11 @@ object TypesakeCore {
     @JvmStatic private external fun clearLearned(): String
     @JvmStatic private external fun exportBackup(): String
     @JvmStatic private external fun importBackup(text: String): String
+    @JvmStatic private external fun importNames(text: String): String
+    @JvmStatic private external fun userWords(): String
+    @JvmStatic private external fun clearUserWords(): String
+    @JvmStatic private external fun rememberMailDomain(domain: String): String
+    @JvmStatic private external fun mailDomains(): String
     @JvmStatic private external fun bumpStats(today: String): String
     @JvmStatic private external fun statsInfo(): String
     @JvmStatic private external fun suggestEnglish(chinese: String): String
@@ -290,6 +295,41 @@ object TypesakeCore {
     fun restoreJson(text: String): Boolean {
         if (!available || text.isBlank()) return false
         return runCatching { !importBackup(text).contains("\"ok\":false") }.getOrDefault(false)
+    }
+
+    /** 导入姓名（换行/逗号/空格分隔）返回新增条数。 */
+    fun importNames(text: String): Int =
+        if (!available) 0 else runCatching { intField(importNames(text), "added") }.getOrDefault(0)
+
+    /** 个人词库（拼音 -> 姓名）。 */
+    fun myNames(): List<Pair<String, String>> {
+        if (!available) return emptyList()
+        return runCatching {
+            splitDelim(userWords()).mapNotNull { item ->
+                val i = item.indexOf(RS)
+                if (i <= 0) null else item.substring(0, i) to item.substring(i + 1)
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    fun clearNames(): Int =
+        if (!available) 0 else runCatching { intField(clearUserWords(), "cleared") }.getOrDefault(0)
+
+    /** 记住邮箱域名（点过就记住，下次优先）。 */
+    fun rememberMailDomain(domain: String) {
+        if (!available || domain.isEmpty()) return
+        runCatching { rememberMailDomain(domain) }
+    }
+
+    /** 已记住的邮箱域名（按次数降序）。 */
+    fun learnedMailDomains(): List<String> {
+        if (!available) return emptyList()
+        return runCatching {
+            splitDelim(mailDomains()).mapNotNull { item ->
+                val i = item.indexOf(RS)
+                if (i <= 0) null else item.substring(0, i)
+            }
+        }.getOrDefault(emptyList())
     }
 
     /** 删除单条收藏。 */

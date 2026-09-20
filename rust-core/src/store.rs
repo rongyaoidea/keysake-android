@@ -2,7 +2,7 @@
 //!
 //! 原子写：先写 `<file>.json.tmp` 再 `rename`，避免进程被杀时留下半截 JSON。
 
-use crate::{engine, english, s2t};
+use crate::{engine, english, s2t, userdic};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -92,6 +92,12 @@ struct Db {
     /// 删词黑名单：(拼音串, 词)
     #[serde(default)]
     blocked: Vec<(String, String)>,
+    /// 个人词库：(拼音, 姓名)
+    #[serde(default)]
+    user_words: Vec<(String, String)>,
+    /// 邮箱域名记忆：(域名, 次数)
+    #[serde(default)]
+    mail_domains: Vec<(String, u32)>,
 }
 
 fn default_version() -> u32 {
@@ -106,6 +112,7 @@ struct Store {
     saved: Vec<SavedPhrase>,
     settings: Settings,
     stats: Stats,
+    user_words: Vec<(String, String)>,
 }
 
 fn store() -> &'static Mutex<Store> {
@@ -163,6 +170,8 @@ fn write_db_locked(s: &Store) -> Result<(), String> {
         stats: s.stats.clone(),
         corrections,
         blocked: engine::export_blocked(),
+        user_words: s.user_words.clone(),
+        mail_domains: userdic::domains_snapshot(),
     };
     let data = serde_json::to_vec(&db).map_err(|e| e.to_string())?;
     write_atomic(&db_path(&s.dir), &data).map_err(|e| e.to_string())
@@ -177,6 +186,8 @@ fn empty_db() -> Db {
         stats: Stats::default(),
         corrections: Vec::new(),
         blocked: Vec::new(),
+        user_words: Vec::new(),
+        mail_domains: Vec::new(),
     }
 }
 
@@ -208,6 +219,8 @@ pub fn init(dir: &str) -> Result<(usize, usize), String> {
     s.saved = db.saved;
     s.settings = db.settings;
     s.stats = db.stats;
+    s.user_words = db.user_words;
+    userdic::set_domains(db.mail_domains);
     sync_memory(&s.saved);
     Ok((s.saved.len(), pins))
 }
@@ -359,6 +372,92 @@ pub fn clear_saved() -> Result<usize, String> {
     Ok(n)
 }
 
+/// 导入姓名（从剪贴板粘的一串名字），返回新增条数。
+pub fn import_names(text: &str) -> Result<usize, String> {
+    let names = userdic::parse_names(text);
+    if names.is_empty() {
+        return Err("没有解析到姓名（每行一个，或用逗号分隔）".to_string());
+    }
+    let mut s = store().lock().map_err(|e| e.to_string())?;
+    let mut added = 0usize;
+    for name in names {
+        let Some(py) = userdic::name_to_pinyin(&name) else {
+            continue;
+        };
+        if s.user_words.iter().any(|(p, w)| p == &py && w == &name) {
+            continue;
+        }
+        s.user_words.push((py, name));
+        added += 1;
+        if s.user_words.len() >= 2000 {
+            break;
+        }
+    }
+    write_db_locked(&s)?;
+    Ok(added)
+}
+
+pub fn user_words() -> Vec<(String, String)> {
+    store()
+        .lock()
+        .map(|s| s.user_words.clone())
+        .unwrap_or_default()
+}
+
+/// 命中给定拼音（精确或前缀）的姓名，最多 limit 条。
+pub fn user_words_for(pinyin: &str, limit: usize) -> Vec<String> {
+    let key = pinyin.trim().to_ascii_lowercase();
+    if key.is_empty() {
+        return Vec::new();
+    }
+    let Ok(s) = store().lock() else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for (py, word) in s.user_words.iter().filter(|(py, _)| py == &key) {
+        let _ = py;
+        if !out.contains(word) {
+            out.push(word.clone());
+        }
+    }
+    if out.len() < limit {
+        for (_py, word) in s
+            .user_words
+            .iter()
+            .filter(|(py, _)| py.starts_with(&key) && py != &key)
+        {
+            if !out.contains(word) {
+                out.push(word.clone());
+                if out.len() >= limit {
+                    break;
+                }
+            }
+        }
+    }
+    out.truncate(limit);
+    out
+}
+
+pub fn clear_user_words() -> usize {
+    let Ok(mut s) = store().lock() else { return 0 };
+    let n = s.user_words.len();
+    s.user_words.clear();
+    let _ = write_db_locked(&s);
+    n
+}
+
+/// 记住邮箱域名（用户点过哪个后缀）。
+pub fn remember_mail_domain(domain: &str) -> Result<usize, String> {
+    userdic::remember_domain(domain);
+    let s = store().lock().map_err(|e| e.to_string())?;
+    write_db_locked(&s)?;
+    Ok(userdic::domains_snapshot().len())
+}
+
+pub fn mail_domains() -> Vec<(String, u32)> {
+    userdic::domains_snapshot()
+}
+
 /// 导出整库 JSON（本地备份，无网络无权限）。
 pub fn export_json() -> Result<String, String> {
     let s = store().lock().map_err(|e| e.to_string())?;
@@ -377,6 +476,8 @@ pub fn export_json() -> Result<String, String> {
             .map(|(typed, word, count)| Correction { typed, word, count })
             .collect(),
         blocked: engine::export_blocked(),
+        user_words: s.user_words.clone(),
+        mail_domains: userdic::domains_snapshot(),
     };
     serde_json::to_string_pretty(&db).map_err(|e| e.to_string())
 }

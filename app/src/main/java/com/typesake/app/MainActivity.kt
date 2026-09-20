@@ -96,6 +96,7 @@ private fun SetupScreen(paletteId: Int, readyTick: Int, onPaletteChange: (Int) -
     var tick by remember { mutableIntStateOf(readyTick) }
     var shuangpin by remember { mutableIntStateOf(prefs.shuangpin) }
     var words by remember(tick) { mutableStateOf(TypesakeCore.myWords()) }
+    var names by remember(tick) { mutableStateOf(TypesakeCore.myNames()) }
     var script by remember { mutableIntStateOf(prefs.script) }
     var vertical by remember { mutableStateOf(prefs.verticalCandidates) }
     var pageKeys by remember { mutableIntStateOf(prefs.pageKeys) }
@@ -198,6 +199,28 @@ private fun SetupScreen(paletteId: Int, readyTick: Int, onPaletteChange: (Int) -
         }
 
         Spacer(Modifier.height(4.dp))
+        Text("名字词库（${names.size}）", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "从通讯录/微信复制一串姓名（换行、逗号或空格分隔），粘贴进来即可用拼音联想。" +
+                "本应用未申请通讯录权限，导入完全由你手动触发。",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = {
+                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                val text = cm?.primaryClip?.takeIf { it.itemCount > 0 }
+                    ?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+                val added = TypesakeCore.importNames(text)
+                names = TypesakeCore.myNames()
+                savedFlash = if (added > 0) "已导入 $added 个姓名" else "没解析到姓名（或已存在）"
+            }) { Text("从剪贴板导入名单") }
+            OutlinedButton(onClick = {
+                TypesakeCore.clearNames()
+                names = TypesakeCore.myNames()
+                savedFlash = "名字词库已清空"
+            }) { Text("清空名字") }
+        }
+
         Text("我的词库（${words.size}）", style = MaterialTheme.typography.titleMedium)
         Text(
             "连续选同一个词 3 次会自动置顶；这里可以删除或清空学习记录。",

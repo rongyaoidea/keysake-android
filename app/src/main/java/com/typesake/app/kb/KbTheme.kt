@@ -33,12 +33,18 @@ object KbThemes {
     const val THEME_LIGHT = 1
     const val THEME_DARK = 2
 
-    /** Claude 珊瑚橙 */
+    /** 陶土橙（主强调） */
     const val CORAL = 0xFFD97757.toInt()
-    /** 奶油底 */
+    /** 暖米白（背景 / 深色底上的文字） */
     const val CREAM = 0xFFFAF9F5.toInt()
-    const val CREAM_DEEP = 0xFFF0EEE6.toInt()
-    const val WARM_BORDER = 0xFFE5E1D8.toInt()
+    /** 中灰（次要文本、分割线、弱化元素） */
+    const val WARM_GRAY = 0xFFB0AEA5.toInt()
+    /** 浅灰（细微背景、输入框、卡片底） */
+    const val LIGHT_GRAY = 0xFFE8E6DC.toInt()
+    /** 尘蓝（信息提示/链接/次要按钮） */
+    const val DUST_BLUE = 0xFF6A9BCC.toInt()
+    /** 鼠尾草绿（成功/有机元素） */
+    const val SAGE = 0xFF788C5D.toInt()
 
     fun paletteOf(id: Int): KbPalette = KbPalette.entries.getOrElse(id) { KbPalette.CORAL }
 
@@ -48,17 +54,17 @@ object KbThemes {
     // ---------------- 默认皮肤：珊瑚橙 + 奶油 + 玻璃 ----------------
 
     private fun coralLight(): KbColors = KbColors(
-        bg = 0xB3F5F3EC.toInt(),          // 奶油玻璃
-        key = 0xE6FFFFFF.toInt(),          // 半透明白键帽
-        keyPressed = 0xCCF3E1D8.toInt(),   // 按下：珊瑚浅晕
-        keyText = 0xFF2A2724.toInt(),
-        actionKey = 0x99EDE9DF.toInt(),
+        bg = 0xB3ECEADF.toInt(),           // 暖米白玻璃
+        key = 0xE6E8E6DC.toInt(),          // 浅灰键帽（输入框/卡片底同色系）
+        keyPressed = 0xCCF3E1D8.toInt(),   // 按下：陶土橙浅晕
+        keyText = 0xFF33312E.toInt(),
+        actionKey = 0x99DCD9CC.toInt(),
         actionText = 0xFF3A3631.toInt(),
         accent = CORAL,
         accentText = 0xFFFFFFFF.toInt(),
         barBg = 0xCCFAF9F5.toInt(),
-        barText = 0xFF3A2A22.toInt(),
-        hint = 0xFF8A8377.toInt(),
+        barText = 0xFF4A2C1E.toInt(),
+        hint = WARM_GRAY,
         glassBorder = 0x66FFFFFF.toInt(),
         glass = true,
     )
@@ -67,14 +73,14 @@ object KbThemes {
         bg = 0xB31F1D1A.toInt(),
         key = 0xE6332E29.toInt(),
         keyPressed = 0xCC4A4038.toInt(),
-        keyText = 0xFFF5F1EC.toInt(),
+        keyText = CREAM,                   // 暖米白用于深色底上的文字
         actionKey = 0x992A2622.toInt(),
         actionText = 0xFFE8E2DA.toInt(),
         accent = CORAL,
         accentText = 0xFFFFFFFF.toInt(),
         barBg = 0xCC26221F.toInt(),
         barText = 0xFFF1E4DA.toInt(),
-        hint = 0xFF9C948A.toInt(),
+        hint = WARM_GRAY,
         glassBorder = 0x33FFFFFF.toInt(),
         glass = true,
     )

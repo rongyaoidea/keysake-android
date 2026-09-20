@@ -384,9 +384,12 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
                 replaceTail(replaceLen, text)
             })
         }
-        for ((domain, suffix) in TextUtils.emailDomainCandidates(before)) {
+        for ((domain, suffix) in TextUtils.emailDomainCandidates(before, TypesakeCore.learnedMailDomains())) {
             shown = true
-            candidateRow.addView(chip("$domain", colors.keyText, colors.key) { commitRaw(suffix) })
+            candidateRow.addView(chip("$domain", colors.keyText, colors.key) {
+                TypesakeCore.rememberMailDomain(domain)
+                commitRaw(suffix)
+            })
         }
         for ((suffix, _) in TextUtils.domainSuffixCandidates(before)) {
             shown = true

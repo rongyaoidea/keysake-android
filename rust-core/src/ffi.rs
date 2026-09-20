@@ -356,6 +356,77 @@ pub extern "system" fn Java_com_typesake_app_TypesakeCore_importBackup<'local>(
     rust_to_jstr(&mut env, &out)
 }
 
+/// 导入姓名（多行/逗号分隔）-> 新增条数
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_importNames<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    jtext: JString<'local>,
+) -> JString<'local> {
+    let text = jstr_to_rust(&mut env, &jtext);
+    let out = guarded(|| match store::import_names(&text) {
+        Ok(n) => ok_json(&format!("\"added\":{n}")),
+        Err(e) => err_json(&e),
+    });
+    rust_to_jstr(&mut env, &out)
+}
+
+/// 个人词库列表（`拼音<RS>姓名`）
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_userWords<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> JString<'local> {
+    let out = guarded(|| {
+        let items: Vec<String> = store::user_words()
+            .into_iter()
+            .map(|(p, w)| format!("{p}\u{1D}{w}"))
+            .collect();
+        join(&items)
+    });
+    rust_to_jstr(&mut env, &out)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_clearUserWords<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> JString<'local> {
+    let out = guarded(|| ok_json(&format!("\"cleared\":{}", store::clear_user_words())));
+    rust_to_jstr(&mut env, &out)
+}
+
+/// 记住邮箱域名 -> 记忆条数
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_rememberMailDomain<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    jdomain: JString<'local>,
+) -> JString<'local> {
+    let d = jstr_to_rust(&mut env, &jdomain);
+    let out = guarded(|| match store::remember_mail_domain(&d) {
+        Ok(n) => ok_json(&format!("\"domains\":{n}")),
+        Err(e) => err_json(&e),
+    });
+    rust_to_jstr(&mut env, &out)
+}
+
+/// 已记住的邮箱域名（`域名<RS>次数`，按次数降序）
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_mailDomains<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> JString<'local> {
+    let out = guarded(|| {
+        let items: Vec<String> = store::mail_domains()
+            .into_iter()
+            .map(|(d, c)| format!("{d}\u{1D}{c}"))
+            .collect();
+        join(&items)
+    });
+    rust_to_jstr(&mut env, &out)
+}
+
 #[no_mangle]
 pub extern "system" fn Java_com_typesake_app_TypesakeCore_statsInfo<'local>(
     mut env: JNIEnv<'local>,

@@ -16,6 +16,7 @@ pub mod s2t;
 pub mod shuangpin;
 pub mod store;
 pub mod t9;
+pub mod userdic;
 
 /// 测试用的全局串行锁：多个模块的用例都会动全局引擎状态（选项/学习/删词），
 /// 并行跑会互相污染，统一用这把锁串行化。

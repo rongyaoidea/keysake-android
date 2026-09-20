@@ -537,6 +537,18 @@ pub fn analyze(input: &str, limit: usize) -> Match {
     eng.dict().lookup_into(&compact, &mut exact);
 
     let mut direct = filter_blocked(&compact, candidates_with(eng, &compact, limit));
+    // 个人词库（名单/通讯录导入）优先：姓名是强个人信号
+    let personal = crate::store::user_words_for(&compact, 2);
+    if !personal.is_empty() {
+        let mut merged = personal;
+        for w in direct {
+            if !merged.contains(&w) {
+                merged.push(w);
+            }
+        }
+        merged.truncate(limit);
+        direct = merged;
+    }
     rerank_with_context(&mut direct);
     if !exact.is_empty() {
         return Match {

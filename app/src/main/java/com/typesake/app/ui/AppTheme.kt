@@ -14,9 +14,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.typesake.app.kb.KbThemes
 
-/** 奶油底 */
+/** Anthropic 色板：暖米白 / 中灰 / 浅灰 + 陶土橙(主) / 尘蓝(次) / 鼠尾草绿(三级) */
 private val Cream = Color(0xFFFAF9F5)
-private val WarmInk = Color(0xFF2A2724)
+private val WarmInk = Color(0xFF33312E)
+private val WarmGray = Color(0xFFB0AEA5)
+private val LightGray = Color(0xFFE8E6DC)
+private val Terracotta = Color(0xFFD97757)
+private val DustBlue = Color(0xFF6A9BCC)
+private val Sage = Color(0xFF788C5D)
 
 /**
  * 默认主题：珊瑚橙（Claude）+ 奶油色 + 玻璃质感。
@@ -25,10 +30,13 @@ private val WarmInk = Color(0xFF2A2724)
 @Composable
 fun TypesakeTheme(paletteId: Int, content: @Composable () -> Unit) {
     val night = isSystemInDarkTheme()
-    val accent = Color(KbThemes.accentOf(KbThemes.paletteOf(paletteId), night))
+    val accent = if (paletteId == 0) Terracotta
+    else Color(KbThemes.accentOf(KbThemes.paletteOf(paletteId), night))
     val scheme = if (night) {
         darkColorScheme(
             primary = accent,
+            secondary = DustBlue,
+            tertiary = Sage,
             background = Color(0xFF1B1917),
             surface = Color(0xFF252220),
             surfaceVariant = Color(0xFF2E2A27),
@@ -38,9 +46,12 @@ fun TypesakeTheme(paletteId: Int, content: @Composable () -> Unit) {
     } else {
         lightColorScheme(
             primary = accent,
+            secondary = DustBlue,
+            tertiary = Sage,
             background = Cream,
             surface = Color(0xFFFFFFFF),
-            surfaceVariant = Color(0xFFF0EEE6),
+            surfaceVariant = LightGray,
+            onSurfaceVariant = WarmGray,
             onBackground = WarmInk,
             onSurface = WarmInk,
         )

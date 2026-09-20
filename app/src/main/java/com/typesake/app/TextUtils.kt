@@ -141,12 +141,16 @@ object TextUtils {
     }
 
     /** 邮箱后缀联想：文本以 `@单词` 结尾时给出常见域名。 */
-    fun emailDomainCandidates(textBefore: String): List<Pair<String, String>> {
+    fun emailDomainCandidates(
+        textBefore: String,
+        learned: List<String> = emptyList(),
+    ): List<Pair<String, String>> {
         val m = Regex("@([a-z0-9.]{1,})$").find(textBefore.lowercase()) ?: return emptyList()
         val typed = m.groupValues[1]
         val out = mutableListOf<Pair<String, String>>()
-        for (domain in listOf("gmail.com", "outlook.com", "qq.com", "163.com", "foxmail.com")) {
-            if (domain != typed && domain.startsWith(typed)) {
+        val pool = learned + listOf("gmail.com", "outlook.com", "qq.com", "163.com", "foxmail.com")
+        for (domain in pool) {
+            if (domain != typed && domain.startsWith(typed) && out.none { it.first == domain }) {
                 out += domain to domain.substring(typed.length)
                 if (out.size >= 3) break
             }
