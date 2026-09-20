@@ -66,6 +66,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     private val t9buf = StringBuilder()
     private var t9Mode = false
     private var engineReady = false
+    private var englishMode = false
     private var pageStart = 0
     private var allCandidates: List<String> = emptyList()
     private var match: TypesakeCore.Match? = null
@@ -127,7 +128,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         colors = resolveColors()
         applyGlassBlur()
         if (::keyboard.isInitialized) {
-            keyboard.render(kind, layer, colors, prefs.keyHeightDp, clipItems.toList(), pairList(), prefs.customSymbols)
+            keyboard.render(kind, layer, colors, prefs.keyHeightDp, clipItems.toList(), pairList(), prefs.customSymbols, englishMode)
             refreshBars()
         }
     }
@@ -156,6 +157,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     override fun onStartInput(info: EditorInfo?, restarting: Boolean) {
         super.onStartInput(info, restarting)
         val inputType = info?.inputType ?: 0
+        englishMode = KbLayouts.prefersEnglish(inputType)
         kind = KbLayouts.kindForInputType(inputType)
         privateField = KbLayouts.learningDisabled(inputType)
         if (privateField) clearComposing()
@@ -166,6 +168,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         if (engineReady) {
             TypesakeCore.setOptions(prefs.fuzzy, prefs.correction, prefs.shuangpin)
         }
+        englishMode = KbLayouts.prefersEnglish(inputType)
         t9Mode = prefs.t9Layout && (kind == KbKind.QWERTY || kind == KbKind.RAW)
         if (t9Mode) kind = KbKind.T9
         clearComposing()
@@ -181,7 +184,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
             pageStart = 0
         allCandidates = emptyList()
         keyboard.setOneHand(OneHand.fromInt(prefs.oneHand))
-            keyboard.render(kind, layer, colors, prefs.keyHeightDp, clipItems.toList(), pairList(), prefs.customSymbols)
+            keyboard.render(kind, layer, colors, prefs.keyHeightDp, clipItems.toList(), pairList(), prefs.customSymbols, englishMode)
             keyboard.setShift(false, false)
             refreshBars()
         }
@@ -321,7 +324,14 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
                 full.take(if (vertical) 4 else 8)
             }
             if (list.isEmpty()) {
-                candidateRow.addView(textLabel("空格直接上屏", colors.hint, colors.barBg))
+                val hint = if (!TypesakeCore.available) {
+                    "引擎未加载（演示模式）：请安装带 .so 的正式包"
+                } else if (!engineReady) {
+                    "引擎加载中…"
+                } else {
+                    "无候选：空格直接上屏（异常可到设置页跑「引擎自检」）"
+                }
+                candidateRow.addView(textLabel(hint, colors.hint, colors.barBg))
             } else {
                 for ((i, word) in list.withIndex()) {
                     candidateRow.addView(
@@ -614,6 +624,13 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
             return
         }
 
+        // 英文模式：字母直接上屏（不转拼音）
+        if (englishMode && text.length == 1 && text[0].isLetter()) {
+            ic.commitText(text, 1)
+            digitRun.setLength(0)
+            refreshBars()
+            return
+        }
         // 九键：数字/字母进缓冲
         if (t9Mode && text.length == 1 && text[0].isLetterOrDigit()) {
             t9buf.append(text.lowercase())
@@ -863,7 +880,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     private fun insertEnglish(english: String) {
         val ic = currentInputConnection ?: return
         if (pinyin.isNotEmpty()) commitTopCandidate()
-        ic.commitText(english, 1)
+        ic.commitText(if (prefs.englishAutoSpace) "$english " else english, 1)
         digitRun.setLength(0)
         predictions = emptyList()
         englishChips = TypesakeCore.englishList(lastCommittedChinese)
@@ -1044,6 +1061,23 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     override fun onCursorLeft() = moveCursor(KeyEvent.KEYCODE_DPAD_LEFT)
 
     override fun onCursorRight() = moveCursor(KeyEvent.KEYCODE_DPAD_RIGHT)
+
+    override fun onToggleEnglish() {
+        englishMode = !englishMode
+        prefs.englishMode = englishMode
+        if (englishMode && pinyin.isNotEmpty()) commitTopCandidate()
+        toast(if (englishMode) "英文输入" else "中文输入")
+        keyboard.render(kind, layer, colors, prefs.keyHeightDp, clipItems.toList(), pairList(), prefs.customSymbols, englishMode)
+        refreshBars()
+    }
+
+    override fun onHideKeyboard() {
+        requestHideSelf(0)
+    }
+
+    override fun onOpenSettings() {
+        startActivity(Intent(this, MainActivity::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
+    }
 
     override fun onClipboardClear() {
         clipItems.clear()

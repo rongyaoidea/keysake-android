@@ -29,6 +29,9 @@ class KbModelsTest {
         assertTrue(labels.contains("⏎"))
         assertTrue(labels.contains("⌫"))
         assertTrue(labels.contains("🌐"))
+        assertTrue(labels.contains("中"))
+        assertTrue(labels.contains("⌵"))
+        assertTrue(labels.contains("⚙"))
     }
 
     @Test
@@ -97,6 +100,33 @@ class KbModelsTest {
             KbKind.QWERTY,
             KbLayouts.kindForInputType(KbLayouts.TYPE_CLASS_TEXT or 0x20),
         )
+    }
+
+    @Test
+    fun urlAndEmailFieldsStayChineseCapable() {
+        // 0x10 是 URI（历史 bug：被当成密码），密码变体应为 0x80
+        assertEquals(
+            KbKind.QWERTY,
+            KbLayouts.kindForInputType(KbLayouts.TYPE_CLASS_TEXT or KbLayouts.TYPE_TEXT_VARIATION_URI),
+        )
+        assertFalse(
+            KbLayouts.learningDisabled(
+                KbLayouts.TYPE_CLASS_TEXT or KbLayouts.TYPE_TEXT_VARIATION_URI
+            )
+        )
+        assertTrue(
+            KbLayouts.learningDisabled(
+                KbLayouts.TYPE_CLASS_TEXT or KbLayouts.TYPE_TEXT_VARIATION_PASSWORD
+            )
+        )
+    }
+
+    @Test
+    fun englishToggleLabelFollowsMode() {
+        val cn = KbLayouts.lettersRows(false, false, englishMode = false).flatMap { it.keys }.map { it.label }
+        val en = KbLayouts.lettersRows(false, false, englishMode = true).flatMap { it.keys }.map { it.label }
+        assertTrue(cn.contains("中"))
+        assertTrue(en.contains("英"))
     }
 
     @Test

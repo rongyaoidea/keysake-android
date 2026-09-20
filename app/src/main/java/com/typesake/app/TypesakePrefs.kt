@@ -79,6 +79,16 @@ class TypesakePrefs(context: Context) {
         get() = sp.getInt(KEY_PAGE_KEYS, 0)
         set(v) = sp.edit().putInt(KEY_PAGE_KEYS, v.coerceIn(0, 1)).apply()
 
+    /** 记住上次的中/英状态 */
+    var englishMode: Boolean
+        get() = sp.getBoolean(KEY_EN, false)
+        set(v) = sp.edit().putBoolean(KEY_EN, v).apply()
+
+    /** 英文上屏后自动补一个空格 */
+    var englishAutoSpace: Boolean
+        get() = sp.getBoolean(KEY_EN_SPACE, true)
+        set(v) = sp.edit().putBoolean(KEY_EN_SPACE, v).apply()
+
     /** 剪贴板历史（仅本次会话内存，不落盘） */
     var clipboardHistory: Boolean
         get() = sp.getBoolean(KEY_CLIPBOARD, true)
@@ -107,5 +117,7 @@ class TypesakePrefs(context: Context) {
         private const val KEY_SYMBOLS = "custom_symbols"
         private const val KEY_VERTICAL = "vertical_candidates"
         private const val KEY_PAGE_KEYS = "page_keys"
+        private const val KEY_EN = "english_mode"
+        private const val KEY_EN_SPACE = "english_auto_space"
     }
 }

@@ -39,6 +39,12 @@ sealed interface KbAction {
     data object OneHandToggle : KbAction
     data object CursorLeft : KbAction
     data object CursorRight : KbAction
+    /** 中/英切换 */
+    data object ToggleEnglish : KbAction
+    /** 收起键盘 */
+    data object HideKeyboard : KbAction
+    /** 打开设置 */
+    data object OpenSettings : KbAction
 }
 
 data class KbKey(
@@ -62,10 +68,12 @@ object KbLayouts {
     const val TYPE_CLASS_DATETIME = 0x00000004
     const val TYPE_MASK_CLASS = 0x0000000f
     const val TYPE_MASK_VARIATION = 0x00000ff0
-    const val TYPE_TEXT_VARIATION_PASSWORD = 0x00000010
+    const val TYPE_TEXT_VARIATION_PASSWORD = 0x00000080
     const val TYPE_TEXT_VARIATION_VISIBLE_PASSWORD = 0x00000090
     const val TYPE_TEXT_VARIATION_WEB_PASSWORD = 0x000000e0
     const val TYPE_NUMBER_VARIATION_PASSWORD = 0x00000010
+    const val TYPE_TEXT_VARIATION_URI = 0x00000010
+    const val TYPE_TEXT_VARIATION_EMAIL_ADDRESS = 0x00000020
 
     const val NUMBER_ROW = "1234567890"
 
@@ -84,7 +92,16 @@ object KbLayouts {
     }
 
     /** 密码/隐私字段：不做拼音转换、不做词频学习、不收藏。 */
+    /** 只有真正的密码变体才关闭拼音/学习；URL、邮箱等仍是普通文本输入。 */
     fun learningDisabled(inputType: Int): Boolean = kindForInputType(inputType) == KbKind.RAW
+
+    /** 是否为 URL/邮箱类输入（这些场景应给英文键盘，但仍允许切回中文）。 */
+    fun prefersEnglish(inputType: Int): Boolean {
+        val cls = inputType and TYPE_MASK_CLASS
+        val variation = inputType and TYPE_MASK_VARIATION
+        return cls == TYPE_CLASS_TEXT &&
+            (variation == TYPE_TEXT_VARIATION_URI || variation == TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
+    }
 
     private fun ins(text: String, weight: Float = 1f, label: String = text) =
         KbKey(id = "ins_$label", label = label, weight = weight, action = KbAction.Insert(text))
@@ -92,7 +109,11 @@ object KbLayouts {
     private fun action(id: String, label: String, weight: Float, a: KbAction, wide: Boolean = true) =
         KbKey(id = id, label = label, weight = weight, action = a, isActionKey = wide)
 
-    fun lettersRows(shifted: Boolean, capsLock: Boolean): List<KbRow> {
+    fun lettersRows(
+        shifted: Boolean,
+        capsLock: Boolean,
+        englishMode: Boolean = false,
+    ): List<KbRow> {
         val rows = mutableListOf<KbRow>()
         rows += KbRow(NUMBER_ROW.map { ins(it.toString()) })
         rows += KbRow("qwertyuiop".map { letter(it, shifted, capsLock) })
@@ -106,13 +127,14 @@ object KbLayouts {
         )
         rows += KbRow(
             listOf(
-                action("symbols", "?123", 1.3f, KbAction.ShowLayer(KbLayer.SYMBOLS)),
-                action("emoji", "☺", 1f, KbAction.ShowLayer(KbLayer.EMOJI)),
+                action("symbols", "?123", 1.1f, KbAction.ShowLayer(KbLayer.SYMBOLS)),
+                action("cn_en", if (englishMode) "英" else "中", 1f, KbAction.ToggleEnglish),
                 action("lang", "🌐", 1f, KbAction.Language),
-                ins(",", 1f),
-                action("space", "空格", 3.2f, KbAction.Space, wide = false),
+                action("hide", "⌵", 1f, KbAction.HideKeyboard),
+                action("settings", "⚙", 1f, KbAction.OpenSettings),
+                action("space", "空格", 2.6f, KbAction.Space, wide = false),
                 ins(".", 1f),
-                action("enter", "⏎", 1.5f, KbAction.Enter),
+                action("enter", "⏎", 1.3f, KbAction.Enter),
             )
         )
         return rows
@@ -228,6 +250,7 @@ object KbLayouts {
         shifted: Boolean,
         capsLock: Boolean,
         customSymbols: String = "",
+        englishMode: Boolean = false,
     ): List<KbRow> =
         when (kind) {
             KbKind.NUMBER -> numberRows()
@@ -235,7 +258,7 @@ object KbLayouts {
             KbKind.T9 -> if (layer == KbLayer.SYMBOLS) symbolRows(customSymbols) else t9Rows()
             KbKind.RAW, KbKind.QWERTY -> when (layer) {
                 KbLayer.SYMBOLS -> symbolRows(customSymbols)
-                else -> lettersRows(shifted, capsLock)
+                else -> lettersRows(shifted, capsLock, englishMode)
             }
         }
 

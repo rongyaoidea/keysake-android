@@ -46,6 +46,9 @@ class KeyboardView(
         fun onCursorRight()
         fun onClipboardClear()
         fun onDeleteWord()
+        fun onToggleEnglish()
+        fun onHideKeyboard()
+        fun onOpenSettings()
     }
 
     var kind: KbKind = KbKind.QWERTY
@@ -62,6 +65,7 @@ class KeyboardView(
     private var clipItems: List<String> = emptyList()
     private var clipPhrases: List<Pair<String, String>> = emptyList()
     private var customSymbols: String = ""
+    private var englishMode = false
 
     private val rows = LinearLayout(context).apply { orientation = VERTICAL }
     private val handler = Handler(Looper.getMainLooper())
@@ -70,6 +74,7 @@ class KeyboardView(
     private var preview: PopupWindow? = null
     private var alternates: PopupWindow? = null
     private var longPress: Runnable? = null
+    private var repeatRunnable: Runnable? = null
 
     init {
         orientation = VERTICAL
@@ -86,8 +91,10 @@ class KeyboardView(
         clipboardItems: List<String> = clipItems,
         phrases: List<Pair<String, String>> = clipPhrases,
         customSymbols: String = "",
+        englishMode: Boolean = false,
     ) {
         this.kind = kind
+        this.englishMode = englishMode
         this.layer = if (kind == KbKind.QWERTY || kind == KbKind.RAW) layer else KbLayer.LETTERS
         this.colors = colors
         this.rowHeightPx = dp(TypesakePrefs.sanitizeKeyHeight(keyHeightDp))
@@ -163,7 +170,7 @@ class KeyboardView(
     // ---------------- 键盘构建 ----------------
 
     private fun buildKeys() {
-        val layout = KbLayouts.rowsFor(kind, layer, shifted, capsLock, customSymbols)
+        val layout = KbLayouts.rowsFor(kind, layer, shifted, capsLock, customSymbols, englishMode)
         for (row in layout) {
             val rowView = LinearLayout(context).apply { orientation = HORIZONTAL }
             for (key in row.keys) {
@@ -395,6 +402,7 @@ class KeyboardView(
             }
             MotionEvent.ACTION_UP -> {
                 cancelPendingLongPress()
+                stopRepeat()
                 v.isPressed = false
                 dismissPreview()
                 if (alternates == null && inside(v, e)) {
@@ -418,6 +426,7 @@ class KeyboardView(
             }
             MotionEvent.ACTION_CANCEL -> {
                 cancelPendingLongPress()
+                stopRepeat()
                 v.isPressed = false
                 dismissPreview()
                 dismissAlternates()
@@ -466,6 +475,9 @@ class KeyboardView(
             KbAction.OneHandToggle -> l.onOneHandToggle()
             KbAction.CursorLeft -> l.onCursorLeft()
             KbAction.CursorRight -> l.onCursorRight()
+            KbAction.ToggleEnglish -> l.onToggleEnglish()
+            KbAction.HideKeyboard -> l.onHideKeyboard()
+            KbAction.OpenSettings -> l.onOpenSettings()
         }
     }
 
@@ -478,6 +490,11 @@ class KeyboardView(
                 listener?.onShiftLongPress()
                 return@Runnable
             }
+            if (key.action is KbAction.Backspace) {
+                dismissPreview()
+                startRepeat(key)
+                return@Runnable
+            }
             val alts = key.longPress.ifEmpty { KbLayouts.alternatesFor(key.label) }
             if (alts.isNotEmpty()) {
                 dismissPreview()
@@ -486,6 +503,21 @@ class KeyboardView(
         }
         longPress = r
         handler.postDelayed(r, LONG_PRESS_MS)
+    }
+
+    /** 长按 ⌫：每 60ms 重复删一个字符（商用输入法标配）。 */
+    private fun startRepeat(key: KbKey) {
+        repeatRunnable = object : Runnable {
+            override fun run() {
+                if (key.action is KbAction.Backspace) listener?.onBackspace()
+                handler.postDelayed(this, 60L)
+            }
+        }.also { handler.postDelayed(it, 60L) }
+    }
+
+    private fun stopRepeat() {
+        repeatRunnable?.let { handler.removeCallbacks(it) }
+        repeatRunnable = null
     }
 
     private fun cancelPendingLongPress() {

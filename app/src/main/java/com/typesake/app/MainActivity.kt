@@ -323,6 +323,22 @@ private fun SetupScreen(paletteId: Int, readyTick: Int, onPaletteChange: (Int) -
                 }
             }
         }
+        var autoSpace by remember { mutableStateOf(prefs.englishAutoSpace) }
+        SwitchRow("英文上屏后自动空格", autoSpace) {
+            autoSpace = it
+            prefs.englishAutoSpace = it
+        }
+        OutlinedButton(
+            onClick = {
+                val a = TypesakeCore.analyze("nihao")
+                val b = TypesakeCore.analyze("zhongguo")
+                val c = TypesakeCore.analyze("jintiankaihui")
+                savedFlash = "自检：引擎=${if (TypesakeCore.available) "已加载" else "未加载"}｜" +
+                    "nihao→${a.candidates.take(2)}｜zhongguo→${b.candidates.take(2)}｜" +
+                    "jintian/kaihui→${c.candidates.take(2)}"
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("引擎自检（候选排查）") }
         SwitchRow("输出繁体（简繁转换）", script == 1) {
             script = if (it) 1 else 0
             prefs.script = script
