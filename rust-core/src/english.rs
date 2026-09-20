@@ -464,6 +464,193 @@ const WORDS: &[(&str, &str)] = &[
     ("假期计划", "vacation plan"),
 ];
 
+/// 词性：动词（结构层"我在X/请X/我想X"要求槽位是动词）
+const VERBS_ZH: &[&str] = &[
+    "开会",
+    "上班",
+    "下班",
+    "加班",
+    "出差",
+    "学习",
+    "工作",
+    "吃饭",
+    "喝水",
+    "睡觉",
+    "休息",
+    "打电话",
+    "发邮件",
+    "发短信",
+    "发送",
+    "确认",
+    "检查",
+    "准备",
+    "完成",
+    "开始",
+    "结束",
+    "喜欢",
+    "想",
+    "要",
+    "需要",
+    "去",
+    "来",
+    "看",
+    "听",
+    "说",
+    "讲",
+    "告诉",
+    "问",
+    "回答",
+    "知道",
+    "了解",
+    "明白",
+    "学",
+    "教",
+    "用",
+    "买",
+    "卖",
+    "吃",
+    "喝",
+    "睡",
+    "玩",
+    "走",
+    "跑",
+    "开车",
+    "坐",
+    "等",
+    "找",
+    "帮",
+    "给",
+    "拿",
+    "放",
+    "打开",
+    "关",
+    "写",
+    "读",
+    "发",
+    "收",
+    "改",
+    "试",
+    "联系",
+    "安排",
+    "做",
+    "有",
+    "祝",
+    "请",
+    "让",
+    "送",
+    "借",
+    "还",
+    "记住",
+    "忘记",
+    "考虑",
+    "决定",
+    "希望",
+    "打算",
+    "继续",
+    "停止",
+    "回来",
+    "回去",
+    "开会时间",
+    "汇报",
+];
+
+/// 词性：形容词（"太X了"要求槽位是形容词）
+const ADJ_ZH: &[&str] = &[
+    "好", "很好", "不好", "大", "小", "多", "少", "快", "慢", "新", "旧", "重要", "简单", "复杂",
+    "难", "容易", "忙", "累", "饿", "渴", "高兴", "开心", "抱歉", "确定", "贵", "便宜", "冷", "热",
+    "早", "晚", "长", "短", "高", "漂亮", "好看", "好玩", "好吃", "干净", "脏", "安静", "吵",
+    "安全", "危险", "困", "甜", "酸", "辣", "咸", "紧张", "无聊",
+];
+
+/// 词性：名词（"X在哪里"要求槽位是名词）
+const NOUN_ZH: &[&str] = &[
+    "北京",
+    "上海",
+    "中国",
+    "公司",
+    "学校",
+    "家",
+    "办公室",
+    "电脑",
+    "手机",
+    "网络",
+    "消息",
+    "照片",
+    "书",
+    "电影",
+    "音乐",
+    "咖啡",
+    "茶",
+    "水",
+    "饭",
+    "早餐",
+    "午餐",
+    "晚餐",
+    "天气",
+    "雨",
+    "行李",
+    "机票",
+    "出租车",
+    "酒店",
+    "地址",
+    "医院",
+    "银行",
+    "超市",
+    "价格",
+    "订单",
+    "合同",
+    "客户",
+    "报告",
+    "文件",
+    "邮件",
+    "会议",
+    "项目",
+    "需求",
+    "方案",
+    "进度",
+    "时间",
+    "钱",
+    "人",
+    "事情",
+    "东西",
+    "地方",
+    "名字",
+    "号码",
+    "问题",
+    "答案",
+    "想法",
+    "计划",
+    "生活",
+    "朋友",
+    "家人",
+    "同事",
+    "老板",
+    "老师",
+    "学生",
+    "电话",
+    "邮箱",
+    "洗手间",
+    "会议室",
+    "护照",
+];
+
+fn slot_has(zh: &str, list: &[&str]) -> bool {
+    let t = zh.trim();
+    list.iter().any(|w| t.starts_with(w))
+}
+
+fn slot_is_verb(zh: &str) -> bool {
+    slot_has(zh, VERBS_ZH)
+}
+
+fn slot_is_adj(zh: &str) -> bool {
+    slot_has(zh, ADJ_ZH)
+}
+
+fn slot_is_noun(zh: &str) -> bool {
+    slot_has(zh, NOUN_ZH)
+}
+
 /// 中文虚词/标点：直译时跳过，不参与覆盖率惩罚。
 const SKIP_CHARS: &str = "的了是在有和就不都一也又还个们这那吗呢吧啊嘛哦嗯着过把被给对向从跟与及之其，。！？、；：\"''（）《》…—~·　 ";
 
@@ -969,24 +1156,44 @@ fn strip_suffix<'a>(text: &'a str, suffix: &str) -> Option<&'a str> {
 pub fn try_patterns(text: &str) -> Option<String> {
     let t = text.trim();
 
-    // 我想/我要/我想要 X -> I'd like to X
+    // 我想/我要/我想要 X：动词 -> I'd like to X；名词 -> I'd like X
     for p in ["我想", "我要", "我想要", "我想去"] {
         if let Some(rest) = strip_prefix(t, p) {
+            let verbish = slot_is_verb(rest) || p == "我想去";
             if let Some(v) = slot(rest) {
                 if looks_like_clause(&v) {
                     return Some(sentence_case(&v));
                 }
-                return Some(sentence_case(&format!("I'd like to {v}")));
+                if verbish {
+                    return Some(sentence_case(&format!("I'd like to {v}")));
+                }
+                if slot_is_noun(rest) {
+                    return Some(sentence_case(&format!("I'd like {v}")));
+                }
             }
         }
     }
-    // 我在 X -> I'm X-ing
+    // 我在 X：动词 -> I'm X-ing；名词/地点 -> I'm in X（修掉 "我在北京" 的误判）
     if let Some(rest) = strip_prefix(t, "我在") {
         if let Some(v) = slot(rest) {
             if looks_like_clause(&v) {
                 return Some(sentence_case(&v));
             }
-            return Some(sentence_case(&format!("I'm {}", to_ing(&v))));
+            if slot_is_verb(rest) {
+                return Some(sentence_case(&format!("I'm {}", to_ing(&v))));
+            }
+            if slot_is_noun(rest) {
+                let prep = if rest.starts_with("家")
+                    || rest.starts_with("公司")
+                    || rest.starts_with("学校")
+                    || rest.starts_with("办公室")
+                {
+                    "at"
+                } else {
+                    "in"
+                };
+                return Some(sentence_case(&format!("I'm {prep} {v}")));
+            }
         }
     }
     // 我们 X 吧 -> Let's X
@@ -1006,18 +1213,22 @@ pub fn try_patterns(text: &str) -> Option<String> {
         }
     }
     if let Some(rest) = strip_prefix(t, "请") {
-        if let Some(v) = slot(rest) {
-            if looks_like_clause(&v) {
-                return Some(sentence_case(&v));
+        if slot_is_verb(rest) {
+            if let Some(v) = slot(rest) {
+                if looks_like_clause(&v) {
+                    return Some(sentence_case(&v));
+                }
+                return Some(sentence_case(&format!("Please {v}")));
             }
-            return Some(sentence_case(&format!("Please {v}")));
         }
     }
-    // 太 X 了 -> That's too X
+    // 太 X 了 -> That's too X（槽位应为形容词）
     if let Some(rest) = strip_suffix(t, "了") {
         if let Some(x) = strip_prefix(rest, "太") {
-            if let Some(v) = slot(x) {
-                return Some(sentence_case(&format!("That's too {v}")));
+            if slot_is_adj(x) {
+                if let Some(v) = slot(x) {
+                    return Some(sentence_case(&format!("That's too {v}")));
+                }
             }
         }
     }
@@ -1048,10 +1259,12 @@ pub fn try_patterns(text: &str) -> Option<String> {
             return Some(sentence_case(&format!("Is there any {v}")));
         }
     }
-    // X 在哪里 -> Where is X?
+    // X 在哪里 -> Where is X?（槽位应为名词/地点）
     if let Some(rest) = strip_suffix(t, "在哪里") {
-        if let Some(v) = slot(rest) {
-            return Some(sentence_case(&format!("Where is {v}")));
+        if slot_is_noun(rest) || slot_is_verb(rest) {
+            if let Some(v) = slot(rest) {
+                return Some(sentence_case(&format!("Where is {v}")));
+            }
         }
     }
     // X 多少钱 -> How much is X?
@@ -1337,12 +1550,26 @@ pub fn english_candidates(text: &str) -> Vec<(u8, String)> {
     if t.is_empty() {
         return Vec::new();
     }
+    // 统一重排：先收集 (kind, text, score)，最后按分数排序截断
+    let mut scored: Vec<(u8, String, i32)> = Vec::new();
     let mut out: Vec<(u8, String)> = Vec::new();
     fn norm(s: &str) -> String {
         s.trim()
             .trim_end_matches(['.', '!', '?', '。', '！', '？'])
             .to_ascii_lowercase()
     }
+    /// 来源基础分（越大越靠前）
+    fn kind_base(kind: u8) -> i32 {
+        match kind {
+            KIND_MINE => 100,
+            KIND_NATIVE => 90,
+            KIND_SENTBANK => 85,
+            KIND_DICT => 70,
+            KIND_PATTERN => 60,
+            _ => 40,
+        }
+    }
+
     fn push(out: &mut Vec<(u8, String)>, kind: u8, s: String) {
         if s.trim().is_empty() {
             return;
@@ -1350,6 +1577,16 @@ pub fn english_candidates(text: &str) -> Vec<(u8, String)> {
         let n = norm(&s);
         if !out.iter().any(|(_, v)| norm(v) == n) {
             out.push((kind, s));
+        }
+    }
+
+    fn push_scored(scored: &mut Vec<(u8, String, i32)>, kind: u8, s: String, bonus: i32) {
+        if s.trim().is_empty() {
+            return;
+        }
+        let n = norm(&s);
+        if !scored.iter().any(|(_, v, _)| norm(v) == n) {
+            scored.push((kind, s, kind_base(kind) + bonus));
         }
     }
 
@@ -1389,9 +1626,9 @@ pub fn english_candidates(text: &str) -> Vec<(u8, String)> {
         push(&mut out, KIND_NATIVE, (*en).to_string());
     }
 
-    // 2.2) 句库（整句精确 / 双字重叠 ≥60%）
-    for (en, _score) in crate::sentbank::lookup(t, 2) {
-        push(&mut out, KIND_SENTBANK, en);
+    // 2.2) 句库（整句精确 / 双字重叠 ≥60%）：重叠分越高排得越前
+    for (en, score) in crate::sentbank::lookup(t, 2) {
+        push_scored(&mut scored, KIND_SENTBANK, en, (score.min(100) as i32) / 4);
     }
 
     // 2.5) 大词典整词命中（CC-CEDICT）
@@ -1416,8 +1653,12 @@ pub fn english_candidates(text: &str) -> Vec<(u8, String)> {
         }
     }
 
-    out.truncate(3);
-    out
+    // 其余层按基础分进入统一排序
+    for (kind, text) in out {
+        push_scored(&mut scored, kind, text, 0);
+    }
+    scored.sort_by(|a, b| b.2.cmp(&a.2));
+    scored.into_iter().take(3).map(|(k, s, _)| (k, s)).collect()
 }
 
 /// 首选英文（空串表示暂无建议）。
@@ -1562,6 +1803,39 @@ mod tests {
         if !v.is_empty() {
             assert!(v.contains("bought") || v.contains("yesterday"), "{v}");
         }
+    }
+
+    #[test]
+    fn pos_gates_patterns() {
+        // 动词槽位 -> 进行时
+        assert!(try_patterns("我在开会").unwrap().starts_with("I'm having"));
+        // 名词槽位 -> I'm in/at（修掉 "I'm being-ing" 这类误判）
+        // 测试环境不加载大词典，用内建词表里的名词（公司）
+        let at_company = try_patterns("我在公司").unwrap();
+        assert!(
+            at_company.starts_with("I'm at") || at_company.starts_with("I'm in"),
+            "{at_company}"
+        );
+        // 形容词槽位才走"太X了"
+        assert_eq!(try_patterns("太贵了").unwrap(), "That's too expensive.");
+        assert!(try_patterns("太公司了").is_none());
+        // 非动词槽位不套"请X"
+        assert!(try_patterns("请公司").is_none());
+    }
+
+    #[test]
+    fn rerank_prefers_stronger_sources() {
+        // 有整句短语时，"地道"必须排第一（分数 90 > 结构 60 / 直译 40）
+        let c = english_candidates("请发送报告");
+        assert_eq!(c.first().map(|(k, _)| *k), Some(KIND_NATIVE), "{c:?}");
+        // 我的（翻译记忆）优先于一切
+        set_memory(vec![(
+            "请发送报告".to_string(),
+            "Kindly send the report.".to_string(),
+        )]);
+        let c2 = english_candidates("请发送报告");
+        assert_eq!(c2.first().map(|(k, _)| *k), Some(KIND_MINE), "{c2:?}");
+        set_memory(Vec::new());
     }
 
     #[test]

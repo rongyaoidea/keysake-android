@@ -225,10 +225,16 @@ pub fn lookup(zh: &str, limit: usize) -> Vec<(String, u32)> {
         let mut score: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
         for gram in &grams {
             let postings = b.gram_postings(gram);
-            // CI 的 clippy(1.98) 建议用 as_chunks；这里保持兼容写法并显式允许
-            #[allow(clippy::chunks_exact_to_as_chunks)]
-            for chunk in postings.chunks_exact(4) {
-                let id = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+            // 用下标遍历而不是 chunks/chunks_exact：避免新旧 clippy 对 as_chunks 的互斥建议
+            #[allow(clippy::needless_range_loop)]
+            for k in 0..postings.len() / 4 {
+                let b = k * 4;
+                let id = u32::from_le_bytes([
+                    postings[b],
+                    postings[b + 1],
+                    postings[b + 2],
+                    postings[b + 3],
+                ]);
                 *score.entry(id).or_insert(0) += 1;
             }
         }
@@ -237,7 +243,7 @@ pub fn lookup(zh: &str, limit: usize) -> Vec<(String, u32)> {
             .into_iter()
             .filter(|(_, s)| *s * 100 / total.max(1) >= 60) // 覆盖率闸门：至少 60% 双字命中
             .collect();
-        ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        ranked.sort_by_key(|x| (std::cmp::Reverse(x.1), x.0));
         for (id, s) in ranked.into_iter().take(limit) {
             if let Some(en) = b.en(id as usize) {
                 if !out.iter().any(|(x, _)| x == en) {
@@ -256,7 +262,7 @@ mod tests {
 
     fn build(pairs: &[(&str, &str)]) -> Vec<u8> {
         let mut sorted: Vec<(&str, &str)> = pairs.to_vec();
-        sorted.sort_by(|a, b| a.0.cmp(b.0));
+        sorted.sort_by_key(|x| x.0);
         let mut zh = Vec::new();
         let mut en = Vec::new();
         let mut idx = Vec::new();
