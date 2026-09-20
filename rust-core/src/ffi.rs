@@ -212,8 +212,15 @@ pub extern "system" fn Java_com_typesake_app_TypesakeCore_statsInfo<'local>(
         let (fuzzy, correction) = engine::options();
         let days = serde_json::to_string(&st.days).unwrap_or_else(|_| "[]".into());
         ok_json(&format!(
-            "\"words\":{},\"days\":{},\"saved\":{},\"lex\":{},\"ini\":{},\"fuzzy\":{},\"correction\":{}",
-            st.words, days, store::saved_count(), lex, ini, fuzzy, correction
+            "\"words\":{},\"days\":{},\"saved\":{},\"lex\":{},\"ini\":{},\"endict\":{},\"fuzzy\":{},\"correction\":{}",
+            st.words,
+            days,
+            store::saved_count(),
+            lex,
+            ini,
+            english::dict_size(),
+            fuzzy,
+            correction
         ))
     });
     rust_to_jstr(&mut env, &out)

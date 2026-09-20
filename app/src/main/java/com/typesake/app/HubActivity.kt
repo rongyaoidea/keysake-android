@@ -35,6 +35,7 @@ class HubActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        TypesakeAssets.ensureEnglishDict(this)
         TypesakeCore.init(filesDir.absolutePath)
         setContent {
             MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {

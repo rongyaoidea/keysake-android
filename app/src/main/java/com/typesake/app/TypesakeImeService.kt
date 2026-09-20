@@ -93,6 +93,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     override fun onCreate() {
         super.onCreate()
         prefs = TypesakePrefs(this)
+        TypesakeAssets.ensureEnglishDict(this)
         TypesakeCore.init(filesDir.absolutePath)
     }
 
@@ -123,6 +124,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        TypesakeAssets.ensureEnglishDict(this)
         TypesakeCore.init(filesDir.absolutePath)
         TypesakeCore.setOptions(prefs.fuzzy, prefs.correction)
         clearComposing()

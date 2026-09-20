@@ -186,6 +186,8 @@ pub fn init(dir: &str) -> Result<(usize, usize), String> {
             .map(|c| (c.typed, c.word, c.count))
             .collect(),
     );
+    // 大词典（可选）：assets 由宿主拷到目录下的 en_dict.tsv
+    let _ = english::load_dict(&Path::new(dir).join("en_dict.tsv").to_string_lossy());
     engine::import_blocked(db.blocked);
     engine::set_options(db.settings.fuzzy, db.settings.correction);
 

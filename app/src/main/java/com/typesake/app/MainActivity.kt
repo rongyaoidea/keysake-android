@@ -47,6 +47,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        TypesakeAssets.ensureEnglishDict(this)
         TypesakeCore.init(filesDir.absolutePath)
         setContent {
             MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
@@ -111,7 +112,7 @@ private fun SetupScreen() {
                 Text("学习数据", style = MaterialTheme.typography.titleMedium)
                 Text(
                     "已输入 ${stats.words} 词 · 连续 ${TextUtils.streak(stats.days, java.time.LocalDate.now().toString())} 天 · " +
-                        "收藏 ${stats.saved} · 词库 ${stats.lex} 条（简拼索引 ${stats.initials}）",
+                        "收藏 ${stats.saved} · 词库 ${stats.lex} 条 · 英文词典 ${stats.endict} 条",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text("点此刷新", style = MaterialTheme.typography.bodySmall, modifier = Modifier.clickable { statTick++ })
@@ -234,6 +235,7 @@ private fun SetupScreen() {
                 Text("· 拼音转换、英文表达、词频学习全部本地完成")
                 Text("· 密码等隐私输入框自动关闭转换、学习与收藏")
                 Text("· 剪贴板历史仅保存在内存，退出即清空")
+                Text("· 英文词典数据来自 CC-CEDICT（CC BY-SA 4.0，署名见仓库 THIRD_PARTY_NOTICES.md）")
             }
         }
         Spacer(Modifier.height(24.dp))

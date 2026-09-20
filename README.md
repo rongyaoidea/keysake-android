@@ -71,7 +71,9 @@ Viterbi 整句组合 + bigram 联想 + L0 用户学习层）；`trigrams` 特性
 
 - 词形变化：-ing / 过去式（含 60+ 不规则动词）/ 三单 / 复数 / a-an / 首字母大写
 - 每一层都过覆盖率闸门：命中率不足时宁可不给，不输出 `… …` 噪音
-- 候选带来源标签（我的｜地道｜结构｜直译），英文条按优先级最多给 3 条
+- 候选带来源标签（我的｜地道｜词典｜结构｜直译），英文条按优先级最多给 3 条
+- **词汇量**：`app/src/main/assets/en_dict.tsv` 打包 CC-CEDICT 生成的 10.3 万条中英词条
+  （assets 只存一份、压缩进 APK；运行时拷到 filesDir 由 Rust 载入，缺失则自动退回内建小词表）
 - 测试里有 30 句日常语料覆盖率断言（≥90%）与形态学单测
 
 ## 图标
@@ -124,6 +126,12 @@ cargo test --manifest-path rust-core/Cargo.toml --release
 注意：debug 包与 release 包签名不同，换装前先卸载。
 
 安装：下载 APK → 安装 → 系统设置里启用「Typesake 输入法」→ 切换 → 输入框打 `nihao`。
+
+## 许可
+
+- 代码：MIT
+- 词典数据 `app/src/main/assets/en_dict.tsv`：CC-CEDICT，**CC BY-SA 4.0**（可能修改过），
+  署名与再分发要求见 `THIRD_PARTY_NOTICES.md`
 
 ## 已知边界
 

@@ -43,6 +43,7 @@ object TypesakeCore {
         val saved: Int = 0,
         val lex: Long = 0L,
         val initials: Int = 0,
+        val endict: Int = 0,
         val fuzzy: Boolean = true,
         val correction: Boolean = true,
     )
@@ -235,6 +236,7 @@ object TypesakeCore {
                 saved = intField(raw, "saved"),
                 lex = longField(raw, "lex"),
                 initials = intField(raw, "ini"),
+                endict = intField(raw, "endict"),
                 fuzzy = boolField(raw, "fuzzy"),
                 correction = boolField(raw, "correction"),
             )

@@ -16,6 +16,8 @@ pub const KIND_MINE: u8 = 1;
 pub const KIND_NATIVE: u8 = 2;
 pub const KIND_PATTERN: u8 = 3;
 pub const KIND_LITERAL: u8 = 4;
+/// 大词典（CC-CEDICT）整词命中
+pub const KIND_DICT: u8 = 5;
 
 /// 整句/整词 -> 地道英文（口语与常用书面语，含商务与学习场景）。
 const PHRASES: &[(&str, &str)] = &[
@@ -578,6 +580,59 @@ pub fn set_memory(items: Vec<(String, String)>) {
     }
 }
 
+// ---------------- 大词典（CC-CEDICT 生成，可选加载） ----------------
+
+fn big_dict() -> &'static Mutex<HashMap<String, String>> {
+    static D: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    D.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 载入 `简体<TAB>英文` 词典文件（assets 由宿主拷到 filesDir 后传入）。
+/// 返回载入条数；文件缺失/为空时返回 0 并保持原有小词表可用。
+pub fn load_dict(path: &str) -> usize {
+    let data = match std::fs::read_to_string(path) {
+        Ok(d) => d,
+        Err(_) => return 0,
+    };
+    let mut map: HashMap<String, String> = HashMap::with_capacity(140_000);
+    for line in data.lines() {
+        if let Some((zh, en)) = line.split_once('\t') {
+            let (zh, en) = (zh.trim(), en.trim());
+            if !zh.is_empty() && !en.is_empty() {
+                map.insert(zh.to_string(), en.to_string());
+            }
+        }
+    }
+    let n = map.len();
+    if n > 0 {
+        if let Ok(mut m) = big_dict().lock() {
+            *m = map;
+        }
+    }
+    n
+}
+
+pub fn dict_size() -> usize {
+    big_dict().lock().map(|m| m.len()).unwrap_or(0)
+}
+
+fn dict_exact(zh: &str) -> Option<String> {
+    big_dict().lock().ok().and_then(|m| m.get(zh).cloned())
+}
+
+/// 最长匹配（1..=6 字）。
+fn dict_longest(chars: &[char], start: usize) -> Option<(usize, String)> {
+    let max = (chars.len() - start).min(6);
+    let map = big_dict().lock().ok()?;
+    for len in (1..=max).rev() {
+        let seg: String = chars[start..start + len].iter().collect();
+        if let Some(v) = map.get(&seg) {
+            return Some((len, v.to_string()));
+        }
+    }
+    None
+}
+
 // ---------------- 词形变化 ----------------
 
 fn is_vowel(c: char) -> bool {
@@ -704,6 +759,11 @@ pub fn article(noun: &str) -> String {
     }
 }
 
+/// 词典释义入句：首字母大写、补句号（保持术语原样，不再做词形变化）。
+fn sentence_case_soft(s: &str) -> String {
+    sentence_case(s)
+}
+
 /// 首字母大写 + 句末标点。
 pub fn sentence_case(s: &str) -> String {
     let t = s.trim();
@@ -798,6 +858,12 @@ fn gloss(text: &str) -> (usize, usize, Vec<String>) {
         }
         if let Some((len, en)) = longest_match(&idx.words_by_first, &chars, i) {
             parts.push(en.to_string());
+            matched += len;
+            i += len;
+            continue;
+        }
+        if let Some((len, en)) = dict_longest(&chars, i) {
+            parts.push(en);
             matched += len;
             i += len;
             continue;
@@ -1187,6 +1253,12 @@ fn literal(text: &str) -> Option<String> {
             i += len;
             continue;
         }
+        if let Some((len, en)) = dict_longest(&chars, i) {
+            objects.push(en);
+            matched += len;
+            i += len;
+            continue;
+        }
         if SKIP_CHARS.contains(chars[i]) {
             i += 1;
             continue;
@@ -1295,6 +1367,11 @@ pub fn english_candidates(text: &str) -> Vec<(u8, String)> {
     // 2) 地道整句
     if let Some((_, en)) = PHRASES.iter().find(|(cn, _)| *cn == t) {
         push(&mut out, KIND_NATIVE, (*en).to_string());
+    }
+
+    // 2.5) 大词典整词命中（CC-CEDICT）
+    if let Some(en) = dict_exact(t) {
+        push(&mut out, KIND_DICT, sentence_case_soft(&en));
     }
 
     // 3) 结构模板
@@ -1485,6 +1562,40 @@ mod tests {
         let mut sorted = kinds.clone();
         sorted.sort();
         assert_eq!(kinds, sorted, "kinds should be ascending (best first)");
+    }
+
+    #[test]
+    fn big_dict_loads_and_serves() {
+        // 用仓库里的真实资产做回归：缺文件则该用例失败，防止漏提交
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../app/src/main/assets/en_dict.tsv"
+        );
+        let n = load_dict(path);
+        assert!(n > 50_000, "expected a large dictionary, got {n}");
+        assert_eq!(dict_size(), n);
+        assert_eq!(dict_exact("咖啡").as_deref(), Some("coffee"));
+        assert!(dict_exact("发票").unwrap_or_default().contains("invoice"));
+        // 整词命中走「词典」层
+        let c = english_candidates("充电宝");
+        assert_eq!(c.first().map(|(k, _)| *k), Some(KIND_DICT));
+        let first = c
+            .first()
+            .map(|(_, s)| s.to_ascii_lowercase())
+            .unwrap_or_default();
+        assert!(first.contains("power bank"), "got {first:?}");
+    }
+
+    #[test]
+    fn big_dict_improves_composition() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../app/src/main/assets/en_dict.tsv"
+        );
+        assert!(load_dict(path) > 50_000);
+        // 词典词参与组合：句子整体覆盖率足够时给出直译
+        let en = suggest("我需要咖啡");
+        assert!(en.to_lowercase().contains("coffee"), "got {en:?}");
     }
 
     #[test]
