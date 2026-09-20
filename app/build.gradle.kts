@@ -31,6 +31,9 @@ android {
                 storePassword = props.getProperty("keystorePassword", "")
                 keyAlias = props.getProperty("keyAlias", "")
                 keyPassword = props.getProperty("keyPassword", "")
+                // v1 + v2：v1 让任何工具（keytool/unzip）都能核对签名证书
+                enableV1Signing = true
+                enableV2Signing = true
             }
         }
     }

@@ -59,8 +59,28 @@ cargo test --manifest-path rust-core/Cargo.toml --release
 - `.github/workflows/android.yml`：`cargo fmt/clippy/test` → 3 ABI `.so` → `testDebugUnitTest` +
   `lintDebug` + `assembleDebug` → 上传 `typesake-debug-apk` 与报告
 - `.github/workflows/release.yml`：打 tag（`v*`）触发，`assembleRelease` 并创建 GitHub Release。
-  配了这些 secrets 会签名，否则产出未签名 APK：`ANDROID_KEYSTORE_BASE64`、
-  `ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`
+  每次发布会用 `apksigner` 打印签名证书指纹，日志可审计
+
+### 签名（固定同一签名）
+
+签名密钥存在仓库 secrets（write-only，无法读回，**务必保留本地备份**）：
+
+| Secret | 内容 |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | keystore 的 base64 |
+| `ANDROID_KEYSTORE_PASSWORD` | store 密码 |
+| `ANDROID_KEY_ALIAS` | 别名（`typesake`） |
+| `ANDROID_KEY_PASSWORD` | key 密码 |
+
+发布证书（SHA-256，用于核对历次发布是否同一签名）：
+
+```
+22:DF:C8:B0:F2:2F:9B:BC:A3:32:16:39:F6:AC:96:A7:39:50:74:D7:23:35:E6:A3:4A:BE:6E:34:37:A7:4F:50
+```
+
+本地备份：`/workspace/typesake-release-backup.jks` + `/workspace/typesake-release-backup.pwd.txt`
+（仅本机，不入库）。没配 secrets 时 workflow 仍可通过，只是产出未签名 APK。
+注意：debug 包与 release 包签名不同，换装前先卸载。
 
 安装：下载 APK → 安装 → 系统设置里启用「Typesake 输入法」→ 切换 → 输入框打 `nihao`。
 

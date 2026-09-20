@@ -81,6 +81,18 @@ jobs:
       - name: Show APK
         run: ls -lh app/build/outputs/apk/release/*.apk
 
+      # 每次发布都打印签名证书指纹：日志可审计，确保历次发布同一签名
+      - name: Verify APK signature
+        run: |
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
+          APKSIGNER="$ANDROID_HOME/build-tools/34.0.0/apksigner"
+          if [ -x "$APKSIGNER" ] && "$APKSIGNER" verify "$APK" >/dev/null 2>&1; then
+            "$APKSIGNER" verify --print-certs "$APK" \
+              | grep -E "Signer #1 certificate (DN|SHA-256)"
+          else
+            echo "APK unsigned: repository has no signing secrets configured"
+          fi
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
