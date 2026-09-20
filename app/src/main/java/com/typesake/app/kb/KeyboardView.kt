@@ -398,6 +398,21 @@ class KeyboardView(
                 addState(intArrayOf(), idle)
             }
             setPadding(dp(2), 0, dp(2), 0)
+            // 学百度：键面右上角用浅色小字提示"上滑符号"，解决"不知道有这功能"
+            val swipeSym = KbLayouts.swipeUpFor(key.label)
+            if (swipeSym != null && key.action is KbAction.Insert && key.label.length == 1) {
+                val sp = android.text.SpannableString("${key.label} $swipeSym")
+                val start = sp.length - swipeSym.length
+                sp.setSpan(
+                    android.text.style.RelativeSizeSpan(0.62f),
+                    start, sp.length, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
+                )
+                sp.setSpan(
+                    android.text.style.ForegroundColorSpan(colors.hint),
+                    start, sp.length, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
+                )
+                text = sp
+            }
             setOnTouchListener { v, e -> handleTouch(this, e) }
         }
     }
@@ -418,10 +433,14 @@ class KeyboardView(
                 stopRepeat()
                 v.isPressed = false
                 dismissPreview()
-                if (alternates == null && inside(v, e)) {
-                    val key = (v as KeyButton).key
-                    val dx = e.x - downX
-                    val dy = e.y - downY
+                // 上滑手势天然会滑出键的上边界：滑动判定不要求仍在键内
+                val key = (v as KeyButton).key
+                val dx = e.x - downX
+                val dy = e.y - downY
+                val swiped = (dy < -dp(12) && dx < dp(18)) ||
+                    (key.action is KbAction.Backspace && dx < -dp(12)) ||
+                    (key.action is KbAction.Space && (dx > dp(12) || dx < -dp(12)))
+                if (alternates == null && (inside(v, e) || swiped)) {
                     when {
                         // A7：阈值按密度换算（原来是像素，高 DPI 屏上过灵敏）
                         dy < -dp(12) && dx < dp(18) -> swipeUp(key)
@@ -446,10 +465,15 @@ class KeyboardView(
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
+                val dx = e.x - downX
+                val dy = e.y - downY
+                // 一旦判定为滑动，立即取消长按（否则长按弹层会抢走上滑手势）
+                if (kotlin.math.abs(dx) > dp(12) || kotlin.math.abs(dy) > dp(12)) {
+                    cancelPendingLongPress()
+                }
                 if (!inside(v, e)) {
                     v.isPressed = false
                     dismissPreview()
-                    cancelPendingLongPress()
                 }
             }
         }

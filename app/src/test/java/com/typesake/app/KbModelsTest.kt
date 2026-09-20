@@ -166,10 +166,11 @@ class KbModelsTest {
     fun bottomRowIsSixKeysAndNumberRowCanHide() {
         val rows = KbLayouts.lettersRows(false, false)
         assertEquals(5, rows.size)
-        assertEquals(6, rows.last().keys.size)
+        assertEquals(7, rows.last().keys.size)
         val hidden = KbLayouts.lettersRows(false, false, hideNumberRow = true)
         assertEquals(4, hidden.size)
         assertTrue(hidden.first().keys.first().label == "q")
+        assertTrue(rows.last().keys.map { it.label }.contains("⌵"))
     }
 
     @Test

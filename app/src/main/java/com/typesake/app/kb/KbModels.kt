@@ -128,15 +128,16 @@ object KbLayouts {
                 action("backspace", "⌫", 1.4f, KbAction.Backspace),
             )
         )
-        // 底行只留 6 键（主流做法）：符号 / 语言 / 中英 / 空格 / 句号 / 回车
+        // 底行：符号 / 中英 / 语言 / 收起键盘 / 空格 / 句号 / 回车
         rows += KbRow(
             listOf(
                 action("symbols", "?123", 1.1f, KbAction.ShowLayer(KbLayer.SYMBOLS)),
-                action("lang", "🌐", 1f, KbAction.Language),
                 action("cn_en", if (englishMode) "英" else "中", 1f, KbAction.ToggleEnglish),
-                action("space", "空格", 3.2f, KbAction.Space, wide = false),
+                action("lang", "🌐", 1f, KbAction.Language),
+                action("hide", "⌵", 1f, KbAction.HideKeyboard),
+                action("space", "空格", 3.0f, KbAction.Space, wide = false),
                 ins(".", 1f),
-                action("enter", "⏎", 1.4f, KbAction.Enter),
+                action("enter", "⏎", 1.3f, KbAction.Enter),
             )
         )
         return rows
