@@ -58,12 +58,13 @@ class TypesakeCoreTest {
 
     @Test
     fun statsJsonFieldParsing() {
-        val raw = "{\"ok\":true,\"words\":42,\"days\":[\"2026-09-19\",\"2026-09-20\"],\"saved\":2,\"fuzzy\":true,\"correction\":false}"
+        val raw = "{\"ok\":true,\"words\":42,\"days\":[\"2026-09-19\",\"2026-09-20\"],\"saved\":2,\"endict\":103469,\"fuzzy\":true,\"correction\":false,\"shuangpin\":1}"
         assertEquals(42, TypesakeCore.intField(raw, "words"))
         assertEquals(listOf("2026-09-19", "2026-09-20"), TypesakeCore.stringArrayField(raw, "days"))
         assertTrue(TypesakeCore.boolField(raw, "fuzzy"))
         assertFalse(TypesakeCore.boolField(raw, "correction"))
         assertEquals(1, TypesakeCore.intField(raw, "shuangpin"))
+        assertEquals(103469, TypesakeCore.intField(raw, "endict"))
     }
 
     @Test
