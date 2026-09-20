@@ -882,8 +882,8 @@ mod tests {
             let best = c[..n]
                 .iter()
                 .max_by(|a, b| {
-                    dict.bigram_boost(Some("喜欢"), b)
-                        .partial_cmp(&dict.bigram_boost(Some("喜欢"), a))
+                    dict.bigram_boost(Some("喜欢"), a)
+                        .partial_cmp(&dict.bigram_boost(Some("喜欢"), b))
                         .unwrap_or(std::cmp::Ordering::Equal)
                 })
                 .cloned()
