@@ -384,6 +384,12 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
                     candidateRow.addView(chip("原样 $raw", colors.hint, colors.key) { commitRaw(raw) })
                 }
             }
+            // #5 超长保护：拼音串过长时提示可直接回车上屏（不阻塞候选）
+            if (pinyin.length > 40) {
+                candidateRow.addView(
+                    chip("过长 · 回车直接上屏", colors.accentText, colors.accent) { commitRaw(pinyin.toString()) }
+                )
+            }
             // B5：候选多于可见数时始终给"更多"入口（提升可发现性）
             val perPageNow = if (vertical) 4 else 8
             if (paged || full.size > perPageNow || list.size >= perPageNow) {

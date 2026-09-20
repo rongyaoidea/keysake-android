@@ -360,6 +360,39 @@ fn split_syllables(input: &str) -> Vec<&str> {
     out
 }
 
+/// 长句断句：在常见小句连接词前补一个逗号，句末补句号（对齐主流输入法的"长句自动标点"）。
+fn punctuate(sentence: &str) -> String {
+    const BREAKS: &[&str] = &[
+        "但是", "所以", "然后", "因为", "而且", "不过", "如果", "我们", "他们", "你们", "今天",
+        "明天", "下午", "晚上", "上午",
+    ];
+    if sentence.chars().count() < 12 {
+        return sentence.to_string();
+    }
+    let mut cut: Option<usize> = None;
+    for b in BREAKS {
+        if let Some(pos) = sentence.find(b) {
+            // 只在句中（前 4 字之后）断一次，避免过度断句
+            if sentence[..pos].chars().count() >= 4 {
+                cut = Some(cut.map_or(pos, |c| c.min(pos)));
+            }
+        }
+    }
+    let mut out = String::with_capacity(sentence.len() + 2);
+    match cut {
+        Some(pos) => {
+            out.push_str(&sentence[..pos]);
+            out.push('，');
+            out.push_str(&sentence[pos..]);
+        }
+        None => out.push_str(sentence),
+    }
+    if !out.ends_with(['。', '！', '？']) {
+        out.push('。');
+    }
+    out
+}
+
 /// 长句组合：按音节切块（每块 ≤ 8 音节 / ≤ 20 字母），逐块 Viterbi 再拼接。
 /// 这是主流输入法处理"超长拼音串"的方式（引擎单次组合上限 30 字母）。
 pub fn compose_long(eng: &PinyinEngine, compact: &str, limit: usize) -> Vec<String> {
@@ -404,13 +437,13 @@ pub fn compose_long(eng: &PinyinEngine, compact: &str, limit: usize) -> Vec<Stri
     if joined.is_empty() {
         return Vec::new();
     }
-    // 整句候选 + 最后一块的备选（方便局部改错）
-    let mut out = vec![joined];
+    // 整句候选（长句自动补标点）+ 最后一块的备选（方便局部改错）
+    let mut out = vec![punctuate(&joined)];
     if chunks.len() >= 2 {
         if let Some(last) = chunks.last() {
             for (_s, w) in dict.top_k_compositions(last, 3) {
                 let head: String = parts[..parts.len() - 1].concat();
-                let cand = format!("{head}{w}");
+                let cand = punctuate(&format!("{head}{w}"));
                 if !out.contains(&cand) {
                     out.push(cand);
                     if out.len() >= limit {
@@ -1049,6 +1082,10 @@ mod tests {
         );
         // 分块拼接不应吐半句
         assert!(m.candidates.iter().all(|w| w.chars().count() >= 4), "{m:?}");
+        // 长句自动标点：句中补逗号、句末补句号
+        let first = &m.candidates[0];
+        assert!(first.ends_with('。'), "长句应带句号: {first}");
+        assert!(first.contains('，'), "长句应在小句处补逗号: {first}");
     }
 
     #[test]
