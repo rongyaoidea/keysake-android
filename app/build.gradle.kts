@@ -9,8 +9,8 @@ plugins {
 }
 
 /** 版本可由 CI 通过 -PversionName=... -PversionCode=... 覆盖（发布 workflow 用 tag）。 */
-val versionNameOverride: String = (project.findProperty("versionName") as? String) ?: "0.3.0"
-val versionCodeOverride: Int = (project.findProperty("versionCode") as? String)?.toIntOrNull() ?: 3
+val versionNameOverride: String = (project.findProperty("versionName") as? String) ?: "0.3.1"
+val versionCodeOverride: Int = (project.findProperty("versionCode") as? String)?.toIntOrNull() ?: 4
 
 android {
     namespace = "com.typesake.app"
