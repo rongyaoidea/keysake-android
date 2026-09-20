@@ -45,6 +45,8 @@ jobs:
           cargo ndk -o ../app/src/main/jniLibs \
             -t armeabi-v7a -t arm64-v8a -t x86_64 \
             build --release
+          # cargo-ndk 会把依赖中的 cdylib 一起拷进来，只保留本引擎，避免 APK 膨胀
+          find ../app/src/main/jniLibs -name '*.so' ! -name 'libtypesake_core.so' -delete
 
       # 签名（可选）：仓库没配 secrets 时产出未签名 APK，流程仍然成功
       - name: Prepare signing (optional)

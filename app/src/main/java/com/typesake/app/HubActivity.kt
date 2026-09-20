@@ -39,7 +39,7 @@ class HubActivity : ComponentActivity() {
         setContent {
             MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
                 Surface(Modifier.fillMaxSize()) {
-                    var items by remember(tick) { mutableStateOf(TypesakeCore.list()) }
+                    var saved by remember(tick) { mutableStateOf(TypesakeCore.list()) }
                     var expanded by remember { mutableStateOf<TypesakeCore.SavedPhrase?>(null) }
                     Column(
                         Modifier.fillMaxSize().padding(20.dp),
@@ -50,15 +50,15 @@ class HubActivity : ComponentActivity() {
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
                             Text(
-                                "学习中心（${items.size}）",
+                                "学习中心（${saved.size}）",
                                 style = MaterialTheme.typography.headlineSmall,
                             )
                             OutlinedButton(onClick = {
                                 TypesakeCore.clear()
-                                items = TypesakeCore.list()
+                                saved = TypesakeCore.list()
                             }) { Text("清空") }
                         }
-                        if (items.isEmpty()) {
+                        if (saved.isEmpty()) {
                             Card(Modifier.fillMaxWidth()) {
                                 Text(
                                     "还没有收藏。去键盘打拼音，点 ★ 或双击空格收藏；\n" +
@@ -68,7 +68,7 @@ class HubActivity : ComponentActivity() {
                             }
                         }
                         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(items) { p ->
+                            items(saved) { p ->
                                 Card(
                                     Modifier.fillMaxWidth().clickable {
                                         expanded = if (expanded == p) null else p

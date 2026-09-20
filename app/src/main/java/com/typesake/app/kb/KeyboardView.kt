@@ -304,7 +304,7 @@ class KeyboardView(
                 return true
             }
             MotionEvent.ACTION_UP -> {
-                cancelLongPress()
+                cancelPendingLongPress()
                 v.isPressed = false
                 dismissPreview()
                 if (alternates == null && inside(v, e)) perform((v as KeyButton).key)
@@ -312,7 +312,7 @@ class KeyboardView(
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
-                cancelLongPress()
+                cancelPendingLongPress()
                 v.isPressed = false
                 dismissPreview()
                 dismissAlternates()
@@ -322,7 +322,7 @@ class KeyboardView(
                 if (!inside(v, e)) {
                     v.isPressed = false
                     dismissPreview()
-                    cancelLongPress()
+                    cancelPendingLongPress()
                 }
             }
         }
@@ -373,7 +373,7 @@ class KeyboardView(
         handler.postDelayed(r, LONG_PRESS_MS)
     }
 
-    private fun cancelLongPress() {
+    private fun cancelPendingLongPress() {
         longPress?.let { handler.removeCallbacks(it) }
         longPress = null
     }
@@ -456,7 +456,7 @@ class KeyboardView(
     private fun dismissPopups() {
         dismissPreview()
         dismissAlternates()
-        cancelLongPress()
+        cancelPendingLongPress()
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()

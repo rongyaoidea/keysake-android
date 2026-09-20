@@ -170,7 +170,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
 
         // 键盘放在 FrameLayout 里，单手模式才能靠 gravity 左右贴边
         val keyboardHost = FrameLayout(this)
-        keyboard = KeyboardView(this, null, prefs, this).apply {
+        keyboard = KeyboardView(this, prefs, this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
