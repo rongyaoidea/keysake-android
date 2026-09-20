@@ -49,6 +49,16 @@ class TypesakePrefs(context: Context) {
         get() = sp.getBoolean(KEY_CORRECTION, true)
         set(v) = sp.edit().putBoolean(KEY_CORRECTION, v).apply()
 
+    /** 双拼方案（0 全拼 1 小鹤） */
+    var shuangpin: Int
+        get() = sp.getInt(KEY_SHUANGPIN, 0)
+        set(v) = sp.edit().putInt(KEY_SHUANGPIN, v.coerceIn(0, 1)).apply()
+
+    /** 键盘布局（false 全键盘 / true 九键） */
+    var t9Layout: Boolean
+        get() = sp.getBoolean(KEY_T9, false)
+        set(v) = sp.edit().putBoolean(KEY_T9, v).apply()
+
     /** 剪贴板历史（仅本次会话内存，不落盘） */
     var clipboardHistory: Boolean
         get() = sp.getBoolean(KEY_CLIPBOARD, true)
@@ -71,5 +81,7 @@ class TypesakePrefs(context: Context) {
         private const val KEY_PALETTE = "palette"
         private const val KEY_FUZZY = "fuzzy"
         private const val KEY_CORRECTION = "correction"
+        private const val KEY_SHUANGPIN = "shuangpin"
+        private const val KEY_T9 = "t9_layout"
     }
 }

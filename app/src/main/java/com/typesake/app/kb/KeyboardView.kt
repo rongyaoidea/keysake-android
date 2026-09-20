@@ -475,7 +475,7 @@ class KeyboardView(
                 listener?.onShiftLongPress()
                 return@Runnable
             }
-            val alts = KbLayouts.alternatesFor(key.label)
+            val alts = key.longPress.ifEmpty { KbLayouts.alternatesFor(key.label) }
             if (alts.isNotEmpty()) {
                 dismissPreview()
                 showAlternates(v, alts)

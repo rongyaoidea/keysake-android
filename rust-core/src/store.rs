@@ -34,6 +34,9 @@ pub struct Settings {
     /// 击键纠错（邻键/漏键/多键/换位）
     #[serde(default = "default_true")]
     pub correction: bool,
+    /// 双拼方案（0=全拼 1=小鹤）
+    #[serde(default)]
+    pub shuangpin: u8,
 }
 
 impl Default for Settings {
@@ -41,6 +44,7 @@ impl Default for Settings {
         Self {
             fuzzy: true,
             correction: true,
+            shuangpin: 0,
         }
     }
 }
@@ -189,7 +193,11 @@ pub fn init(dir: &str) -> Result<(usize, usize), String> {
     // 大词典（可选）：assets 由宿主拷到目录下的 en_dict.tsv
     let _ = english::load_dict(&Path::new(dir).join("en_dict.tsv").to_string_lossy());
     engine::import_blocked(db.blocked);
-    engine::set_options(db.settings.fuzzy, db.settings.correction);
+    engine::set_options(
+        db.settings.fuzzy,
+        db.settings.correction,
+        db.settings.shuangpin,
+    );
 
     let mut s = store().lock().map_err(|e| e.to_string())?;
     s.dir = dir.to_string();
@@ -208,11 +216,63 @@ pub fn settings() -> Settings {
 }
 
 /// 写入输入选项并落盘。
-pub fn set_settings(fuzzy: bool, correction: bool) -> Result<(), String> {
-    engine::set_options(fuzzy, correction);
+pub fn set_settings(fuzzy: bool, correction: bool, shuangpin: u8) -> Result<(), String> {
+    engine::set_options(fuzzy, correction, shuangpin);
     let mut s = store().lock().map_err(|e| e.to_string())?;
-    s.settings = Settings { fuzzy, correction };
+    s.settings = Settings {
+        fuzzy,
+        correction,
+        shuangpin,
+    };
     write_db_locked(&s)
+}
+
+/// 修改收藏的英文（收藏可编辑：反哺翻译记忆）。按 (中文, 旧英文) 定位。
+pub fn update_saved(chinese: &str, old_english: &str, new_english: &str) -> Result<bool, String> {
+    let (cn, old, new) = (chinese.trim(), old_english.trim(), new_english.trim());
+    if cn.is_empty() || new.is_empty() {
+        return Err("中文与新英文都不能为空".to_string());
+    }
+    let mut s = store().lock().map_err(|e| e.to_string())?;
+    let mut hit = false;
+    for p in s.saved.iter_mut() {
+        if p.chinese == cn && p.english == old {
+            p.english = new.to_string();
+            p.saved_at = now_secs();
+            hit = true;
+            break;
+        }
+    }
+    if hit {
+        // 去重：改完后若与既有条目重复，只保留一条
+        let mut seen: Vec<(String, String)> = Vec::new();
+        s.saved.retain(|p| {
+            let k = (p.chinese.clone(), p.english.clone());
+            if seen.contains(&k) {
+                false
+            } else {
+                seen.push(k);
+                true
+            }
+        });
+        write_db_locked(&s)?;
+        sync_memory(&s.saved);
+    }
+    Ok(hit)
+}
+
+/// 删除单条收藏。
+pub fn delete_saved(chinese: &str, english: &str) -> Result<bool, String> {
+    let (cn, en) = (chinese.trim(), english.trim());
+    let mut s = store().lock().map_err(|e| e.to_string())?;
+    let before = s.saved.len();
+    s.saved.retain(|p| !(p.chinese == cn && p.english == en));
+    let hit = s.saved.len() != before;
+    if hit {
+        write_db_locked(&s)?;
+        sync_memory(&s.saved);
+    }
+    Ok(hit)
 }
 
 /// 记一次上屏（词数 + 当天活跃）。
@@ -356,9 +416,11 @@ mod tests {
         let dir = tmp_dir("meta");
         init(&dir).unwrap();
 
-        set_settings(false, true).unwrap();
-        assert_eq!(engine::options(), (false, true));
-        set_settings(true, true).unwrap();
+        set_settings(false, true, 0).unwrap();
+        assert_eq!(engine::options(), (false, true, 0));
+        set_settings(true, true, 1).unwrap();
+        assert_eq!(engine::options().2, 1);
+        set_settings(true, true, 0).unwrap();
 
         engine::remember("nihap", "你好");
         bump_stats(3, "2026-09-19").unwrap();
@@ -376,7 +438,21 @@ mod tests {
         assert!(engine::export_learned()
             .iter()
             .any(|(t, w, c)| t == "nihap" && w == "你好" && *c >= 1));
-        assert_eq!(engine::options(), (true, true));
+        assert_eq!(engine::options(), (true, true, 0));
+    }
+
+    #[test]
+    fn saved_edit_and_delete() {
+        let _g = lock();
+        let dir = tmp_dir("edit");
+        init(&dir).unwrap();
+        save_phrase("你好", "Hello!").unwrap();
+        assert!(update_saved("你好", "Hello!", "Hi there!").unwrap());
+        assert_eq!(list_saved()[0].english, "Hi there!");
+        assert!(!update_saved("你好", "Hello!", "Nope").unwrap());
+        assert!(delete_saved("你好", "Hi there!").unwrap());
+        assert!(list_saved().is_empty());
+        assert!(update_saved("你好", "x", "  ").is_err());
     }
 
     #[test]

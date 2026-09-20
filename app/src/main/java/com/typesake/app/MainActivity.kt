@@ -3,10 +3,12 @@ package com.typesake.app
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -35,25 +38,38 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
 import com.typesake.app.ui.GlassCard
 import com.typesake.app.ui.TypesakeTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.time.LocalDate
 
 /** 首页：状态 + 启用指引 + 试打 + 设置 + 隐私说明。 */
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        TypesakeAssets.ensureEnglishDict(this)
-        TypesakeCore.init(filesDir.absolutePath)
         val prefs = TypesakePrefs(this)
         setContent {
             var paletteId by remember { mutableIntStateOf(prefs.palette) }
+            var ready by remember { mutableIntStateOf(0) }
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                withContext(Dispatchers.IO) {
+                    TypesakeAssets.ensureEnglishDict(this@MainActivity)
+                    TypesakeCore.init(filesDir.absolutePath)
+                    TypesakeCore.setOptions(prefs.fuzzy, prefs.correction, prefs.shuangpin)
+                }
+                ready++
+            }
             TypesakeTheme(paletteId) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    SetupScreen(paletteId) { paletteId = it }
+                    SetupScreen(paletteId, ready) { paletteId = it }
                 }
             }
         }
@@ -61,7 +77,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun SetupScreen(paletteId: Int, onPaletteChange: (Int) -> Unit) {
+private fun SetupScreen(paletteId: Int, readyTick: Int, onPaletteChange: (Int) -> Unit) {
     val context = LocalContext.current
     val prefs = remember { TypesakePrefs(context) }
 
@@ -74,7 +90,9 @@ private fun SetupScreen(paletteId: Int, onPaletteChange: (Int) -> Unit) {
     var palette by remember { mutableIntStateOf(paletteId) }
     var fuzzy by remember { mutableStateOf(prefs.fuzzy) }
     var correction by remember { mutableStateOf(prefs.correction) }
-    var statTick by remember { mutableIntStateOf(0) }
+    var statTick by remember { mutableIntStateOf(readyTick) }
+    var shuangpin by remember { mutableIntStateOf(prefs.shuangpin) }
+    var t9 by remember { mutableStateOf(prefs.t9Layout) }
     var trial by remember { mutableStateOf("") }
     var savedFlash by remember { mutableStateOf("") }
 
@@ -112,10 +130,13 @@ private fun SetupScreen(paletteId: Int, onPaletteChange: (Int) -> Unit) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("学习数据", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "已输入 ${stats.words} 词 · 连续 ${TextUtils.streak(stats.days, java.time.LocalDate.now().toString())} 天 · " +
+                    "已输入 ${stats.words} 词 · 连续 " +
+                        "${TextUtils.streak(stats.days, LocalDate.now().toString())} 天 · " +
                         "收藏 ${stats.saved} · 词库 ${stats.lex} 条 · 英文词典 ${stats.endict} 条",
                     style = MaterialTheme.typography.bodyMedium,
                 )
+                Heatmap(stats.days)
+                Text("最近 12 周输入活跃度", style = MaterialTheme.typography.bodySmall)
                 Text("点此刷新", style = MaterialTheme.typography.bodySmall, modifier = Modifier.clickable { statTick++ })
             }
         }
@@ -198,15 +219,32 @@ private fun SetupScreen(paletteId: Int, onPaletteChange: (Int) -> Unit) {
                 }
             }
         }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("全拼" to 0, "小鹤双拼" to 1).forEach { (label, id) ->
+                if (shuangpin == id) {
+                    Button(onClick = {}) { Text(label) }
+                } else {
+                    OutlinedButton(onClick = {
+                        shuangpin = id
+                        prefs.shuangpin = id
+                        TypesakeCore.setOptions(fuzzy, correction, id)
+                    }) { Text(label) }
+                }
+            }
+        }
+        SwitchRow("九键输入（T9）", t9) {
+            t9 = it
+            prefs.t9Layout = it
+        }
         SwitchRow("模糊音（z/zh、n/l、an/ang…）", fuzzy) {
             fuzzy = it
             prefs.fuzzy = it
-            TypesakeCore.setOptions(it, correction)
+            TypesakeCore.setOptions(it, correction, shuangpin)
         }
         SwitchRow("击键纠错（邻键/漏键/多键/换位）", correction) {
             correction = it
             prefs.correction = it
-            TypesakeCore.setOptions(fuzzy, it)
+            TypesakeCore.setOptions(fuzzy, it, shuangpin)
         }
         Text("按键高度 ${keyHeight.toInt()} dp", style = MaterialTheme.typography.bodyMedium)
         Slider(
@@ -241,6 +279,32 @@ private fun SetupScreen(paletteId: Int, onPaletteChange: (Int) -> Unit) {
             }
         }
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+/** B5 输入热力图（最近 12 周，每格一天）。 */
+@Composable
+private fun Heatmap(days: List<String>, weeks: Int = 12) {
+    val active = remember(days) { days.toHashSet() }
+    val today = LocalDate.now()
+    val start = today.minusDays(((weeks - 1) * 7 + (today.dayOfWeek.value % 7)).toLong())
+    val onColor = MaterialTheme.colorScheme.primary
+    val offColor = MaterialTheme.colorScheme.surfaceVariant
+    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        for (w in 0 until weeks) {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                for (d in 0 until 7) {
+                    val date = start.plusDays((w * 7 + d).toLong())
+                    val on = !date.isAfter(today) && active.contains(date.toString())
+                    Box(
+                        Modifier
+                            .size(11.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(if (on) onColor else offColor)
+                    )
+                }
+            }
+        }
     }
 }
 

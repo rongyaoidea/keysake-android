@@ -62,6 +62,10 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
 
     private val pinyin = StringBuilder()
     private val digitRun = StringBuilder()
+    /** 九键缓冲（数字串，可混入长按插入的字母） */
+    private val t9buf = StringBuilder()
+    private var t9Mode = false
+    private var engineReady = false
     private var match: TypesakeCore.Match? = null
     private var candidates: List<String> = emptyList()
     private var predictions: List<String> = emptyList()
@@ -93,8 +97,19 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     override fun onCreate() {
         super.onCreate()
         prefs = TypesakePrefs(this)
-        TypesakeAssets.ensureEnglishDict(this)
-        TypesakeCore.init(filesDir.absolutePath)
+        // C1：词典拷贝/JSON 载入/L0 导入全部移出主线程（首次约 50–150ms）
+        io.launch {
+            TypesakeAssets.ensureEnglishDict(this@TypesakeImeService)
+            TypesakeCore.init(filesDir.absolutePath)
+            TypesakeCore.setOptions(prefs.fuzzy, prefs.correction, prefs.shuangpin)
+            withContext(Dispatchers.Main) {
+                engineReady = true
+                if (::keyboard.isInitialized) {
+                    keyboard.render(kind, layer, colors, prefs.keyHeightDp, clipItems.toList(), pairList())
+                    refreshBars()
+                }
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -146,10 +161,13 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
-        TypesakeAssets.ensureEnglishDict(this)
-        TypesakeCore.init(filesDir.absolutePath)
-        TypesakeCore.setOptions(prefs.fuzzy, prefs.correction)
+        if (engineReady) {
+            TypesakeCore.setOptions(prefs.fuzzy, prefs.correction, prefs.shuangpin)
+        }
+        t9Mode = prefs.t9Layout && (kind == KbKind.QWERTY || kind == KbKind.RAW)
+        if (t9Mode) kind = KbKind.T9
         clearComposing()
+        t9buf.setLength(0)
         digitRun.setLength(0)
         predictions = emptyList()
         englishChips = emptyList()
@@ -243,6 +261,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
 
     private fun clearComposing() {
         pinyin.setLength(0)
+        t9buf.setLength(0)
         candidates = emptyList()
         match = null
         lastCommittedChinese = ""
@@ -257,6 +276,20 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         if (!::candidateRow.isInitialized) return
         candidateRow.removeAllViews()
         applyBarBackground(candidateScroll)
+
+        // 0) 九键输入中
+        if (t9Mode && t9buf.isNotEmpty()) {
+            candidateRow.addView(textLabel(t9buf.toString(), colors.accent, colors.barBg))
+            val list = match?.candidates ?: candidates
+            if (list.isEmpty()) {
+                candidateRow.addView(textLabel("继续输入数字，或长按数字键插入原字", colors.hint, colors.barBg))
+            } else {
+                for ((i, word) in list.withIndex()) {
+                    candidateRow.addView(candidateChip(if (i < 9) "${i + 1} $word" else word, word))
+                }
+            }
+            return
+        }
 
         // 1) 拼音输入中
         if (pinyin.isNotEmpty()) {
@@ -283,6 +316,15 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
                     )
                 }
             }
+            // A3 误纠错一键还原：把原样输入也作为候选
+            if (m != null && m.corrected) {
+                val raw = pinyin.toString()
+                if (raw.isNotEmpty() && !list.contains(raw)) {
+                    candidateRow.addView(chip("原样 $raw", colors.hint, colors.key) { commitRaw(raw) })
+                }
+            }
+            // A4 候选翻页
+            candidateRow.addView(chip("更多 ▸", colors.hint, colors.key) { showMoreCandidates() })
             return
         }
 
@@ -456,6 +498,17 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
             setBackgroundColor(colors.bg)
             setPadding(dp(6), dp(6), dp(6), dp(6))
         }
+        // A6 以词定字：多字候选可只取其中一字
+        if (word.length > 1) {
+            for (ch in word.take(6)) {
+                row.addView(
+                    chip(ch.toString(), colors.keyText, colors.key) {
+                        dismissActionPopup()
+                        commitRaw(ch.toString())
+                    }
+                )
+            }
+        }
         row.addView(
             chip("置顶", colors.accentText, colors.accent, onClick = {
                 TypesakeCore.pin(popupPinyin, popupWord)
@@ -500,6 +553,17 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
             return
         }
 
+        // 九键：数字/字母进缓冲
+        if (t9Mode && text.length == 1 && text[0].isLetterOrDigit()) {
+            t9buf.append(text.lowercase())
+            selfEdit = true
+            ic.setComposingText(t9buf.toString(), 1)
+            requestCandidates(t9buf.toString())
+            return
+        }
+        if (t9Mode && (t9buf.isNotEmpty() || pinyin.isNotEmpty())) {
+            commitTopCandidate()
+        }
         // 拼音输入中：数字键选候选
         if (pinyin.isNotEmpty() && text.length == 1 && text[0].isDigit()) {
             val idx = if (text == "0") 9 else text[0].digitToInt() - 1
@@ -579,6 +643,20 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         lookupJob?.cancel()
         lookupJob = io.launch {
             delay(15)
+            if (t9Mode) {
+                val list = TypesakeCore.t9(p)
+                val cached = TypesakeCore.cached(p)
+                withContext(Dispatchers.Main) {
+                    if (t9buf.toString() == p) {
+                        val hit = list.ifEmpty { cached ?: emptyList() }
+                        match = TypesakeCore.Match(matched = p, corrected = false, remembered = false, candidates = hit)
+                        candidates = hit
+                        renderCandidates()
+                        renderComposingEnglish(hit)
+                    }
+                }
+                return@launch
+            }
             val m = TypesakeCore.analyze(p)
             withContext(Dispatchers.Main) {
                 if (pinyin.toString() == p) {
@@ -603,18 +681,70 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
 
     private fun commitCandidate(word: String) {
         val ic = currentInputConnection ?: return
-        val typed = pinyin.toString()
+        val typed = if (t9Mode) t9buf.toString() else pinyin.toString()
         val corrected = match?.corrected == true || match?.remembered == true
         ic.commitText(word, 1)
         selfEdit = true
         pinyin.setLength(0)
+        t9buf.setLength(0)
         candidates = emptyList()
         match = null
         lastCommittedChinese = word
-        if (typed.isNotEmpty()) {
+        if (typed.isNotEmpty() && !t9Mode) {
             io.launch { TypesakeCore.pick(typed, word, corrected) }
         }
+        TypesakeCore.context(word)
         afterCommit(word)
+    }
+
+    /** 原样上屏（不做纠错/不学习），并清空组合状态。 */
+    private fun commitRaw(text: String) {
+        val ic = currentInputConnection ?: return
+        ic.commitText(text, 1)
+        selfEdit = true
+        pinyin.setLength(0)
+        t9buf.setLength(0)
+        candidates = emptyList()
+        match = null
+        refreshBars()
+    }
+
+    /** A4：候选翻页（最多 24 条） */
+    private fun showMoreCandidates() {
+        val typed = if (t9Mode) t9buf.toString() else pinyin.toString()
+        if (typed.isEmpty()) return
+        io.launch {
+            val list = TypesakeCore.more(typed)
+            withContext(Dispatchers.Main) { showListPopup(list) }
+        }
+    }
+
+    private fun showListPopup(items: List<String>) {
+        if (items.isEmpty()) {
+            toast("没有更多候选")
+            return
+        }
+        dismissActionPopup()
+        val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val scroll = android.widget.ScrollView(this)
+        for (w in items) {
+            column.addView(
+                chip(w, colors.keyText, colors.key) {
+                    dismissActionPopup()
+                    commitRaw(w)
+                },
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+        }
+        scroll.addView(column)
+        val popup = PopupWindow(scroll, dp(240), dp(260), true).apply { isOutsideTouchable = true }
+        val loc = IntArray(2)
+        candidateRow.getLocationInWindow(loc)
+        popup.showAtLocation(candidateRow, Gravity.NO_GRAVITY, loc[0] + dp(8), loc[1] + dp(44))
+        actionPopup = popup
     }
 
     private fun commitTopCandidate() {
@@ -674,6 +804,10 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
 
     override fun onSpace() {
         val ic = currentInputConnection ?: return
+        if (t9Mode && t9buf.isNotEmpty()) {
+            commitTopCandidate()
+            return
+        }
         if (pinyin.isNotEmpty()) {
             commitTopCandidate()
         } else {
@@ -691,6 +825,10 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
 
     override fun onEnter() {
         val ic = currentInputConnection ?: return
+        if (t9Mode && t9buf.isNotEmpty()) {
+            commitTopCandidate()
+            return
+        }
         if (pinyin.isNotEmpty()) {
             commitTopCandidate()
             return
@@ -708,6 +846,20 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
 
     override fun onBackspace() {
         val ic = currentInputConnection ?: return
+        if (t9Mode && t9buf.isNotEmpty()) {
+            t9buf.deleteCharAt(t9buf.length - 1)
+            selfEdit = true
+            if (t9buf.isEmpty()) {
+                ic.setComposingText("", 1)
+                candidates = emptyList()
+                match = null
+                renderCandidates()
+            } else {
+                ic.setComposingText(t9buf.toString(), 1)
+                requestCandidates(t9buf.toString())
+            }
+            return
+        }
         if (pinyin.isNotEmpty()) {
             pinyin.deleteCharAt(pinyin.length - 1)
             selfEdit = true
@@ -736,6 +888,14 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     /** 滑动删除：一次删掉光标前的一个词块。 */
     override fun onDeleteWord() {
         val ic = currentInputConnection ?: return
+        if (t9Mode && t9buf.isNotEmpty()) {
+            t9buf.setLength(0)
+            ic.setComposingText("", 1)
+            candidates = emptyList()
+            match = null
+            renderCandidates()
+            return
+        }
         if (pinyin.isNotEmpty()) {
             clearComposing()
             ic.setComposingText("", 1)

@@ -145,6 +145,28 @@ class KbModelsTest {
     }
 
     @Test
+    fun t9LayoutCoversDigitsAndLongPress() {
+        val rows = KbLayouts.t9Rows()
+        val labels = rows.flatMap { it.keys }.map { it.label }
+        for (d in '0'..'9') {
+            assertTrue("missing digit $d", labels.any { it.startsWith(d.toString()) })
+        }
+        assertTrue(labels.contains("空格"))
+        val two = rows.flatMap { it.keys }.first { it.label.startsWith("2") }
+        assertTrue(two.longPress.contains("2"))
+        assertTrue(two.longPress.contains("a"))
+        assertTrue(two.longPress.contains("c"))
+    }
+
+    @Test
+    fun t9KindUsesT9RowsAndSymbolsLayer() {
+        val t9 = KbLayouts.rowsFor(KbKind.T9, KbLayer.LETTERS, false, false)
+        assertEquals(5, t9.size)
+        val symbols = KbLayouts.rowsFor(KbKind.T9, KbLayer.SYMBOLS, false, false).flatMap { it.keys }.map { it.label }
+        assertTrue(symbols.contains("ABC"))
+    }
+
+    @Test
     fun spaceAndBackspaceAreActions() {
         val keys = KbLayouts.lettersRows(false, false).flatMap { it.keys }
         val space = keys.first { it.label == "空格" }

@@ -42,8 +42,12 @@ jobs:
         run: |
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
           export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
+          # arm64 独享 trigrams（联想更准，体积 +13.5MB）；其余 ABI 不带
+          if [ "0" = "1" ]; then
+            cargo ndk -o ../app/src/main/jniLibs -t arm64-v8a build --release --features trigrams
+          fi
           cargo ndk -o ../app/src/main/jniLibs \
-            -t armeabi-v7a -t arm64-v8a -t x86_64 \
+            -t armeabi-v7a -t x86_64 \
             build --release
           # cargo-ndk 会把依赖中的 cdylib 一起拷进来，只保留本引擎，避免 APK 膨胀
           find ../app/src/main/jniLibs -name '*.so' ! -name 'libtypesake_core.so' -delete

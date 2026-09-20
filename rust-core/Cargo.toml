@@ -9,6 +9,11 @@ license = "MIT"
 crate-type = ["cdylib", "rlib"]
 name = "typesake_core"
 
+[features]
+default = []
+# 三元组联想：体积 +13.5MB/ABI，CI 只对 arm64 开启
+trigrams = ["inputx-pinyin/trigrams"]
+
 [dependencies]
 jni = "0.21"
 serde = { version = "1", features = ["derive"] }

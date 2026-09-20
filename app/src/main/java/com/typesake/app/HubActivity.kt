@@ -1,6 +1,8 @@
 package com.typesake.app
 
 import android.os.Bundle
+import android.speech.tts.TextToSpeech
+import java.util.Locale
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
@@ -12,35 +14,53 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
 import com.typesake.app.ui.GlassCard
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.typesake.app.ui.TypesakeTheme
 
 /** 学习中心：收藏列表 + 点击看语法讲解 + 清空（回到前台自动刷新）。 */
 class HubActivity : ComponentActivity() {
 
     private var tick by mutableIntStateOf(0)
+    private var tts: TextToSpeech? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        TypesakeAssets.ensureEnglishDict(this)
-        TypesakeCore.init(filesDir.absolutePath)
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                TypesakeAssets.ensureEnglishDict(this@HubActivity)
+                TypesakeCore.init(filesDir.absolutePath)
+            }
+            tick++
+        }
+        tts = TextToSpeech(this) { }
+        tts?.language = Locale.US
         setContent {
             TypesakeTheme(TypesakePrefs(this@HubActivity).palette) {
                 Surface(Modifier.fillMaxSize()) {
                     var saved by remember(tick) { mutableStateOf(TypesakeCore.list()) }
                     var expanded by remember { mutableStateOf<TypesakeCore.SavedPhrase?>(null) }
+                    var editing by remember { mutableStateOf<TypesakeCore.SavedPhrase?>(null) }
+                    var editEn by remember { mutableStateOf("") }
                     Column(
                         Modifier.fillMaxSize().padding(20.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -101,6 +121,15 @@ class HubActivity : ComponentActivity() {
                                                 style = MaterialTheme.typography.bodySmall,
                                             )
                                         }
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            TextButton(onClick = { speak(p.english.ifBlank { p.chinese }) }) {
+                                                Text("🔊 朗读")
+                                            }
+                                            TextButton(onClick = {
+                                                editing = p
+                                                editEn = p.english
+                                            }) { Text("编辑英文") }
+                                        }
                                     }
                                 }
                             }
@@ -114,5 +143,16 @@ class HubActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         tick++
+    }
+
+    override fun onDestroy() {
+        tts?.stop()
+        tts?.shutdown()
+        super.onDestroy()
+    }
+
+    private fun speak(text: String) {
+        if (text.isBlank()) return
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "typesake")
     }
 }

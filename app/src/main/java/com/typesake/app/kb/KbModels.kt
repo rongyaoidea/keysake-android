@@ -11,7 +11,7 @@ package com.typesake.app.kb
 
 enum class KbLayer { LETTERS, SYMBOLS, EMOJI, CLIPBOARD, PHRASES }
 
-enum class KbKind { QWERTY, NUMBER, PHONE, RAW }
+enum class KbKind { QWERTY, T9, NUMBER, PHONE, RAW }
 
 enum class OneHand {
     NONE, LEFT, RIGHT;
@@ -47,6 +47,8 @@ data class KbKey(
     val weight: Float = 1f,
     val action: KbAction,
     val isActionKey: Boolean = false,
+    /** 长按可选内容（九键用：raw 数字/字母/标点）；为空则回退到全局变体表 */
+    val longPress: List<String> = emptyList(),
 )
 
 data class KbRow(val keys: List<KbKey>)
@@ -139,6 +141,52 @@ object KbLayouts {
         ),
     )
 
+    /** 九键（T9）：1-9 输入拼音数字串，长按可插入原始数字/字母/标点。 */
+    fun t9Rows(): List<KbRow> {
+        fun digitKey(d: Char, letters: String): KbKey = KbKey(
+            id = "t9_$d",
+            label = if (letters.isEmpty()) "$d" else "$d $letters",
+            weight = 1f,
+            action = KbAction.Insert(d.toString()),
+            longPress = listOf(d.toString()) + letters.map { it.toString() } + T9_PUNCT[d].orEmpty(),
+        )
+        val digits = mapOf(
+            '2' to "abc", '3' to "def", '4' to "ghi", '5' to "jkl",
+            '6' to "mno", '7' to "pqrs", '8' to "tuv", '9' to "wxyz",
+        )
+        return listOf(
+            KbRow(listOf(digitKey('1', ""), digitKey('2', "abc"), digitKey('3', "def"))),
+            KbRow(listOf(digitKey('4', "ghi"), digitKey('5', "jkl"), digitKey('6', "mno"))),
+            KbRow(listOf(digitKey('7', "pqrs"), digitKey('8', "tuv"), digitKey('9', "wxyz"))),
+            KbRow(
+                listOf(
+                    action("t9_symbols", "?123", 1f, KbAction.ShowLayer(KbLayer.SYMBOLS)),
+                    KbKey(
+                        id = "t9_0",
+                        label = "0 ␣",
+                        weight = 1f,
+                        action = KbAction.Insert("0"),
+                        longPress = listOf("0", " "),
+                    ),
+                    action("t9_backspace", "⌫", 1.4f, KbAction.Backspace),
+                )
+            ),
+            KbRow(
+                listOf(
+                    action("t9_emoji", "☺", 1f, KbAction.ShowLayer(KbLayer.EMOJI)),
+                    action("t9_space", "空格", 3f, KbAction.Space, wide = false),
+                    action("t9_enter", "⏎", 1.5f, KbAction.Enter),
+                )
+            ),
+        )
+    }
+
+    private val T9_PUNCT: Map<Char, List<String>> = mapOf(
+        '1' to listOf("。", "，", "？", "！"),
+        '2' to listOf("@"),
+        '3' to listOf("#"),
+    )
+
     fun numberRows(): List<KbRow> = listOf(
         KbRow(listOf("1", "2", "3").map { ins(it) }),
         KbRow(listOf("4", "5", "6").map { ins(it) }),
@@ -173,6 +221,7 @@ object KbLayouts {
         when (kind) {
             KbKind.NUMBER -> numberRows()
             KbKind.PHONE -> phoneRows()
+            KbKind.T9 -> if (layer == KbLayer.SYMBOLS) symbolRows() else t9Rows()
             KbKind.RAW, KbKind.QWERTY -> when (layer) {
                 KbLayer.SYMBOLS -> symbolRows()
                 else -> lettersRows(shifted, capsLock)

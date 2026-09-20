@@ -44,6 +44,7 @@ object TypesakeCore {
         val lex: Long = 0L,
         val initials: Int = 0,
         val endict: Int = 0,
+        val shuangpin: Int = 0,
         val fuzzy: Boolean = true,
         val correction: Boolean = true,
     )
@@ -89,7 +90,12 @@ object TypesakeCore {
     @JvmStatic private external fun pinCandidate(pinyin: String, word: String): String
     @JvmStatic private external fun forgetCandidate(pinyin: String, word: String): String
     @JvmStatic private external fun predictNext(word: String): String
-    @JvmStatic private external fun setEngineOptions(fuzzy: Boolean, correction: Boolean): String
+    @JvmStatic private external fun setEngineOptions(fuzzy: Boolean, correction: Boolean, shuangpin: Int): String
+    @JvmStatic private external fun setContext(word: String): String
+    @JvmStatic private external fun moreCandidates(input: String): String
+    @JvmStatic private external fun t9Candidates(digits: String): String
+    @JvmStatic private external fun updateSaved(chinese: String, oldEnglish: String, newEnglish: String): String
+    @JvmStatic private external fun deleteSaved(chinese: String, english: String): String
     @JvmStatic private external fun bumpStats(today: String): String
     @JvmStatic private external fun statsInfo(): String
     @JvmStatic private external fun suggestEnglish(chinese: String): String
@@ -211,11 +217,41 @@ object TypesakeCore {
         if (!available) emptyList()
         else runCatching { splitDelim(predictNext(word)) }.getOrDefault(emptyList())
 
-    /** 写入模糊音/击键纠错开关（会落盘）。 */
-    fun setOptions(fuzzy: Boolean, correction: Boolean) {
+    /** 写入模糊音/击键纠错/双拼 选项（会落盘）。 */
+    fun setOptions(fuzzy: Boolean, correction: Boolean, shuangpin: Int = 0) {
         if (!available) return
-        runCatching { setEngineOptions(fuzzy, correction) }
+        runCatching { setEngineOptions(fuzzy, correction, shuangpin) }
         synchronized(cache) { cache.clear() }
+    }
+
+    /** 记录刚上屏的词：bigram 重排 + trigram 联想。 */
+    fun context(word: String) {
+        if (!available || word.isEmpty()) return
+        runCatching { setContext(word) }
+    }
+
+    /** 候选翻页：更多候选。 */
+    fun more(input: String): List<String> =
+        if (!available) cached(input) ?: fallbackCandidates(input)
+        else runCatching { splitDelim(moreCandidates(input)) }.getOrDefault(emptyList())
+
+    /** 九键候选。 */
+    fun t9(digits: String): List<String> =
+        if (!available) fallbackCandidates(digits)
+        else runCatching { splitDelim(t9Candidates(digits)) }.getOrDefault(emptyList())
+
+    /** 编辑收藏英文（反哺翻译记忆）。 */
+    fun updateSaved(chinese: String, oldEnglish: String, newEnglish: String): Boolean {
+        if (!available) return MemStore.update(chinese, oldEnglish, newEnglish)
+        return runCatching { intField(updateSaved(chinese, oldEnglish, newEnglish), "updated") == 1 }
+            .getOrDefault(false)
+    }
+
+    /** 删除单条收藏。 */
+    fun deleteSaved(chinese: String, english: String): Boolean {
+        if (!available) return MemStore.delete(chinese, english)
+        return runCatching { intField(deleteSaved(chinese, english), "deleted") == 1 }
+            .getOrDefault(false)
     }
 
     /** 记一次上屏（词数 + 当天活跃）。 */
@@ -237,6 +273,7 @@ object TypesakeCore {
                 lex = longField(raw, "lex"),
                 initials = intField(raw, "ini"),
                 endict = intField(raw, "endict"),
+                shuangpin = intField(raw, "shuangpin"),
                 fuzzy = boolField(raw, "fuzzy"),
                 correction = boolField(raw, "correction"),
             )
@@ -337,5 +374,16 @@ object TypesakeCore {
 
         @Synchronized
         fun clear(): Int = items.size.also { items.clear() }
+
+        @Synchronized
+        fun delete(c: String, e: String): Boolean = items.removeAll { it.chinese == c && it.english == e }
+
+        @Synchronized
+        fun update(c: String, oldEn: String, newEn: String): Boolean {
+            val i = items.indexOfFirst { it.chinese == c && it.english == oldEn }
+            if (i < 0) return false
+            items[i] = items[i].copy(english = newEn, saved_at = System.currentTimeMillis() / 1000)
+            return true
+        }
     }
 }

@@ -9,7 +9,7 @@
 
 use crate::{engine, english, store};
 use jni::objects::{JClass, JString};
-use jni::sys::jboolean;
+use jni::sys::{jboolean, jint};
 use jni::JNIEnv;
 
 pub const FIELD: char = '\u{1E}';
@@ -179,9 +179,88 @@ pub extern "system" fn Java_com_typesake_app_TypesakeCore_setEngineOptions<'loca
     _class: JClass<'local>,
     fuzzy: jboolean,
     correction: jboolean,
+    shuangpin: jint,
 ) -> JString<'local> {
-    let out = guarded(|| match store::set_settings(fuzzy != 0, correction != 0) {
-        Ok(()) => ok_json("\"saved\":1"),
+    let scheme = u8::try_from(shuangpin).unwrap_or(0);
+    let out = guarded(
+        || match store::set_settings(fuzzy != 0, correction != 0, scheme) {
+            Ok(()) => ok_json("\"saved\":1"),
+            Err(e) => err_json(&e),
+        },
+    );
+    rust_to_jstr(&mut env, &out)
+}
+
+/// 记录刚上屏的词（bigram 重排 + trigram 联想）。
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_setContext<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    jword: JString<'local>,
+) -> JString<'local> {
+    let w = jstr_to_rust(&mut env, &jword);
+    let out = guarded(|| {
+        engine::set_context(&w);
+        ok_json("\"ok\":1")
+    });
+    rust_to_jstr(&mut env, &out)
+}
+
+/// 候选翻页：更多候选（最多 24 条）。
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_moreCandidates<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    input: JString<'local>,
+) -> JString<'local> {
+    let s = jstr_to_rust(&mut env, &input);
+    let out = guarded(|| join(&engine::more_candidates(&s, 24)));
+    rust_to_jstr(&mut env, &out)
+}
+
+/// 九键候选：数字串 -> 候选。
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_t9Candidates<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    digits: JString<'local>,
+) -> JString<'local> {
+    let s = jstr_to_rust(&mut env, &digits);
+    let out = guarded(|| join(&engine::t9_candidates(&s, 8)));
+    rust_to_jstr(&mut env, &out)
+}
+
+/// 编辑收藏英文（反哺翻译记忆）。
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_updateSaved<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    jcn: JString<'local>,
+    jold: JString<'local>,
+    jnew: JString<'local>,
+) -> JString<'local> {
+    let cn = jstr_to_rust(&mut env, &jcn);
+    let old = jstr_to_rust(&mut env, &jold);
+    let new = jstr_to_rust(&mut env, &jnew);
+    let out = guarded(|| match store::update_saved(&cn, &old, &new) {
+        Ok(hit) => ok_json(&format!("\"updated\":{hit}")),
+        Err(e) => err_json(&e),
+    });
+    rust_to_jstr(&mut env, &out)
+}
+
+/// 删除单条收藏。
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_deleteSaved<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    jcn: JString<'local>,
+    jen: JString<'local>,
+) -> JString<'local> {
+    let cn = jstr_to_rust(&mut env, &jcn);
+    let en = jstr_to_rust(&mut env, &jen);
+    let out = guarded(|| match store::delete_saved(&cn, &en) {
+        Ok(hit) => ok_json(&format!("\"deleted\":{hit}")),
         Err(e) => err_json(&e),
     });
     rust_to_jstr(&mut env, &out)
@@ -209,10 +288,10 @@ pub extern "system" fn Java_com_typesake_app_TypesakeCore_statsInfo<'local>(
     let out = guarded(|| {
         let st = store::stats();
         let (lex, ini) = engine::lexicon_info();
-        let (fuzzy, correction) = engine::options();
+        let (fuzzy, correction, shuangpin) = engine::options();
         let days = serde_json::to_string(&st.days).unwrap_or_else(|_| "[]".into());
         ok_json(&format!(
-            "\"words\":{},\"days\":{},\"saved\":{},\"lex\":{},\"ini\":{},\"endict\":{},\"fuzzy\":{},\"correction\":{}",
+            "\"words\":{},\"days\":{},\"saved\":{},\"lex\":{},\"ini\":{},\"endict\":{},\"fuzzy\":{},\"correction\":{},\"shuangpin\":{}",
             st.words,
             days,
             store::saved_count(),
@@ -220,7 +299,8 @@ pub extern "system" fn Java_com_typesake_app_TypesakeCore_statsInfo<'local>(
             ini,
             english::dict_size(),
             fuzzy,
-            correction
+            correction,
+            shuangpin
         ))
     });
     rust_to_jstr(&mut env, &out)

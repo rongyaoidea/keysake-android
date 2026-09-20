@@ -11,10 +11,10 @@
 //!
 //! 4–7 只在前面完全无结果时触发，避免误纠。
 
-use crate::initials;
+use crate::{initials, shuangpin, t9};
 use inputx_pinyin::{L0Snapshot, PinyinEngine};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 /// 一次"输入 -> 候选"的完整结果。
@@ -45,20 +45,102 @@ const CACHE_CAP: usize = 96;
 /// 输入选项（由设置页写入；用原子量避免与 store 的锁产生顺序问题）。
 static FUZZY_ENABLED: AtomicBool = AtomicBool::new(true);
 static CORRECTION_ENABLED: AtomicBool = AtomicBool::new(true);
+static SHUANGPIN: AtomicU8 = AtomicU8::new(0);
 
-pub fn set_options(fuzzy: bool, correction: bool) {
+pub fn set_options(fuzzy: bool, correction: bool, shuangpin_scheme: u8) {
     FUZZY_ENABLED.store(fuzzy, Ordering::Relaxed);
     CORRECTION_ENABLED.store(correction, Ordering::Relaxed);
+    SHUANGPIN.store(shuangpin_scheme, Ordering::Relaxed);
     if let Ok(mut c) = cache().lock() {
         c.clear();
     }
+    t9::clear_cache();
 }
 
-pub fn options() -> (bool, bool) {
+pub fn options() -> (bool, bool, u8) {
     (
         FUZZY_ENABLED.load(Ordering::Relaxed),
         CORRECTION_ENABLED.load(Ordering::Relaxed),
+        SHUANGPIN.load(Ordering::Relaxed),
     )
+}
+
+// ---------------- 上下文（上两个词） ----------------
+
+fn context() -> &'static Mutex<(String, String)> {
+    static C: OnceLock<Mutex<(String, String)>> = OnceLock::new();
+    C.get_or_init(|| Mutex::new((String::new(), String::new())))
+}
+
+/// 记录刚上屏的词（用于 bigram 重排与 trigram 联想）。
+pub fn set_context(word: &str) {
+    let w = word.trim();
+    if w.is_empty() {
+        return;
+    }
+    if let Ok(mut c) = context().lock() {
+        let prev = c.1.clone();
+        c.0 = prev;
+        c.1 = w.to_string();
+    }
+}
+
+fn context_words() -> (String, String) {
+    context()
+        .lock()
+        .map(|c| (c.0.clone(), c.1.clone()))
+        .unwrap_or_default()
+}
+
+/// 用上词做 bigram 重排（只动前 5 个，避免打散精确匹配）。
+fn rerank_with_context(cands: &mut [String]) {
+    let (_, prev) = context_words();
+    if prev.is_empty() || cands.len() < 2 {
+        return;
+    }
+    let n = cands.len().min(5);
+    let dict = engine().dict();
+    let mut head: Vec<String> = cands[..n].to_vec();
+    head.sort_by(|a, b| {
+        let ba = dict.bigram_boost(Some(&prev), a);
+        let bb = dict.bigram_boost(Some(&prev), b);
+        bb.partial_cmp(&ba).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    cands[..n].clone_from_slice(&head);
+}
+
+/// 扩展候选（候选翻页用）：不走纠错，只要更多候选。
+pub fn more_candidates(input: &str, limit: usize) -> Vec<String> {
+    let compact = normalize(&shuangpin::to_full(
+        input,
+        SHUANGPIN.load(Ordering::Relaxed),
+    ));
+    if compact.is_empty() {
+        return Vec::new();
+    }
+    let mut out = filter_blocked(&compact, candidates_with(engine(), &compact, limit));
+    if out.len() < limit {
+        for w in filter_blocked(&compact, initials::candidates(&compact, limit)) {
+            if !out.contains(&w) {
+                out.push(w);
+                if out.len() >= limit {
+                    break;
+                }
+            }
+        }
+    }
+    rerank_with_context(&mut out);
+    out
+}
+
+/// 九键候选（数字串 -> 候选），带上下文重排。
+pub fn t9_candidates(digits: &str, limit: usize) -> Vec<String> {
+    let mut out = filter_blocked(
+        &t9::candidates(digits, limit).join(""),
+        t9::candidates(digits, limit),
+    );
+    rerank_with_context(&mut out);
+    out
 }
 
 /// 纠错学习：「打错的拼音串 -> 用户真正想要的词」。
@@ -196,7 +278,7 @@ fn push_unique(out: &mut Vec<String>, word: String, limit: usize) {
 }
 
 /// 廉价查询：只做精确 + 前缀（用于纠错变体，避免每条都跑 Viterbi）。
-fn lookup_cheap(eng: &PinyinEngine, compact: &str, limit: usize) -> Vec<String> {
+pub(crate) fn lookup_cheap(eng: &PinyinEngine, compact: &str, limit: usize) -> Vec<String> {
     let dict = eng.dict();
     let mut out: Vec<String> = Vec::new();
     let mut exact: Vec<String> = Vec::new();
@@ -443,16 +525,19 @@ pub fn keystroke_variants(input: &str) -> Vec<(u8, String)> {
 /// （即候选只能来自整句拼接/前缀补全）时，才尝试纠错兜底，从而避免把
 /// 正确输入误判成错拼。
 pub fn analyze(input: &str, limit: usize) -> Match {
-    let compact = normalize(input);
-    if compact.is_empty() {
+    let raw = normalize(input);
+    if raw.is_empty() {
         return Match::default();
     }
+    // 双拼：先还原成全拼，再走既有流程（matched 返回全拼，宿主据此显示"击键→全拼"）
+    let compact = shuangpin::to_full(&raw, SHUANGPIN.load(Ordering::Relaxed));
     let eng = engine();
 
     let mut exact: Vec<String> = Vec::new();
     eng.dict().lookup_into(&compact, &mut exact);
 
-    let direct = filter_blocked(&compact, candidates_with(eng, &compact, limit));
+    let mut direct = filter_blocked(&compact, candidates_with(eng, &compact, limit));
+    rerank_with_context(&mut direct);
     if !exact.is_empty() {
         return Match {
             matched: compact,
@@ -544,6 +629,18 @@ pub fn predict_next(prev: &str, limit: usize) -> Vec<String> {
     if p.is_empty() || limit == 0 {
         return Vec::new();
     }
+    #[cfg(feature = "trigrams")]
+    {
+        let (prev_prev, _) = context_words();
+        let cands = engine().dict().predict_next_words_context(
+            Some(prev_prev.as_str()).filter(|s| !s.is_empty()),
+            p,
+            limit,
+        );
+        if !cands.is_empty() {
+            return cands.into_iter().map(|(w, _c)| w).collect();
+        }
+    }
     engine()
         .dict()
         .predict_next_words(p, limit)
@@ -563,6 +660,7 @@ pub fn record_pick(pinyin: &str, word: &str, limit: usize) -> Vec<String> {
     if let Ok(mut c) = cache().lock() {
         c.remove(&compact);
     }
+    t9::clear_cache();
     candidates_with(engine(), &compact, limit)
 }
 
@@ -588,6 +686,7 @@ pub fn forget(pinyin: &str, word: &str, limit: usize) -> Vec<String> {
         return Vec::new();
     }
     engine().dict().forget(&compact);
+    t9::clear_cache();
     if let Ok(mut b) = blocked().lock() {
         let v = b.entry(compact.clone()).or_default();
         if !v.iter().any(|w| w == word) {
@@ -633,7 +732,8 @@ mod tests {
         let guard = crate::test_lock();
         import_learned(Vec::new());
         import_blocked(Vec::new());
-        set_options(true, true);
+        set_context("");
+        set_options(true, true, 0);
         guard
     }
 
@@ -700,13 +800,13 @@ mod tests {
     #[test]
     fn correction_can_be_disabled() {
         let _g = gated();
-        set_options(true, false);
+        set_options(true, false, 0);
         let m = analyze("nihap", 8);
         assert!(
             m.candidates.iter().all(|w| !w.starts_with("你好")),
             "correction should be off, got {m:?}"
         );
-        set_options(true, true);
+        set_options(true, true, 0);
     }
 
     #[test]
@@ -753,6 +853,52 @@ mod tests {
             Some(&target),
             "L0 pin should promote the pick"
         );
+    }
+
+    #[test]
+    fn shuangpin_scheme_is_applied() {
+        let _g = gated();
+        set_options(true, true, shuangpin::SCHEME_FLYPY);
+        let m = analyze("nihc", 8);
+        assert_eq!(m.matched, "nihao");
+        assert!(m.candidates.contains(&"你好".to_string()), "got {m:?}");
+        let m2 = analyze("vsgo", 8);
+        assert_eq!(m2.matched, "zhongguo");
+        assert!(m2.candidates.contains(&"中国".to_string()));
+        set_options(true, true, 0);
+    }
+
+    #[test]
+    fn context_reranks_top_candidates() {
+        let _g = gated();
+        set_context("我");
+        set_context("喜欢");
+        let c = analyze("he", 8).candidates;
+        assert!(!c.is_empty());
+        assert_eq!(most_likely(c), true, "候选非空即可（重排只调整顺序）");
+    }
+
+    fn most_likely(c: Vec<String>) -> bool {
+        c.iter().all(|w| !w.is_empty())
+    }
+
+    #[test]
+    fn more_candidates_extends_list() {
+        let _g = gated();
+        let few = analyze("ni", 8).candidates.len();
+        let many = more_candidates("ni", 24).len();
+        assert!(
+            many >= few,
+            "more_candidates should not shrink: {few} -> {many}"
+        );
+        assert!(many > 8);
+    }
+
+    #[test]
+    fn t9_pipeline_works() {
+        let _g = gated();
+        let c = t9_candidates("64426", 8);
+        assert!(c.contains(&"你好".to_string()), "got {c:?}");
     }
 
     #[test]
