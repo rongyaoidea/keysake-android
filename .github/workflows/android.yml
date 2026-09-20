@@ -35,7 +35,7 @@ jobs:
         run: cargo clippy --manifest-path rust-core/Cargo.toml --all-targets -- -D warnings
 
       # 生成 lex.bin/gram.bin，让混简拼等端到端用例在 CI 真正执行（失败则用例自动跳过）
-      - name: rust: build lexicon for tests
+      - name: "rust: build lexicon for tests"
         continue-on-error: true
         run: |
           curl -sSL --max-time 120 -o /tmp/jieba_dict.txt \
