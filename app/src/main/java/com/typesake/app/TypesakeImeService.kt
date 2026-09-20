@@ -329,21 +329,26 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     }
 
     /** 中文候选：字号更大（主视觉），支持长按置顶/删词。 */
-    private fun candidateChip(label: String, word: String): TextView = TextView(this).apply {
-        text = label
-        setTextColor(colors.keyText)
-        textSize = 17f
-        maxLines = 1
-        gravity = Gravity.CENTER
-        setPadding(dp(14), dp(9), dp(14), dp(9))
-        background = GradientDrawable().apply {
-            setColor(colors.key)
-            cornerRadius = dp(9).toFloat()
+    private fun candidateChip(label: String, word: String): TextView {
+        // 注意：GradientDrawable 自己也有 colors 属性，apply 里必须显式取外层字段
+        val keyColor = colors.key
+        val textColor = colors.keyText
+        return TextView(this).apply {
+            text = label
+            setTextColor(textColor)
+            textSize = 17f
+            maxLines = 1
+            gravity = Gravity.CENTER
+            setPadding(dp(14), dp(9), dp(14), dp(9))
+            background = GradientDrawable().apply {
+                setColor(keyColor)
+                cornerRadius = dp(9).toFloat()
+            }
+            isClickable = true
+            setOnClickListener { commitCandidate(word) }
+            setOnLongClickListener { showCandidateActions(word); true }
+            layoutParams = chipParams()
         }
-        isClickable = true
-        setOnClickListener { commitCandidate(word) }
-        setOnLongClickListener { showCandidateActions(word); true }
-        layoutParams = chipParams()
     }
 
     /** 英文/操作条：字号更小（次要信息）。 */

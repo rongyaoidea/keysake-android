@@ -57,7 +57,7 @@ class KeyboardView(
 
     private var shifted = false
     private var capsLock = false
-    private var colors: KbColors = KbThemes.light
+    private var colors: KbColors = KbThemes.resolve(KbPalette.GREEN, KbThemes.THEME_LIGHT, false)
     private var rowHeightPx: Int = dp(46)
     private var clipItems: List<String> = emptyList()
     private var clipPhrases: List<Pair<String, String>> = emptyList()

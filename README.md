@@ -58,6 +58,16 @@ Viterbi 整句组合 + bigram 联想 + L0 用户学习层）；`trigrams` 特性
 - 词频学习：连选同一候选 3 次自动置顶（L0 自动 pin），跨重启保留
 - 收藏与学习数据原子落盘；文件损坏时安全降级为空
 
+## 图标
+
+手绘线条稿（键帽 = 打字，A = 英语，笔迹 + 落点 = 书写/学习）：
+
+- `app/src/main/res/drawable/ic_typesake_line.xml` — 应用内线条图标（纯描边，可 tint）
+- `app/src/main/res/drawable/ic_launcher_foreground.xml` + `ic_launcher_background.xml`
+  + `ic_launcher_monochrome.xml` — 自适应图标三层（含 Android 13 主题化单色层）
+- `app/src/main/res/mipmap-anydpi-v26/{ic_launcher,ic_launcher_round}.xml`
+- `docs/icon/typesake-line.svg` — 同一套路径的 SVG 源文件
+
 ## 本地开发
 
 ```sh

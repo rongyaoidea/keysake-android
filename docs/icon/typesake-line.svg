@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Typesake 线条图标（手绘矢量源文件）
+  键帽 = 打字，A = 英语，笔迹 + 落点 = 书写 / 学习。
+  与 Android 端 res/drawable/ic_typesake_line.xml 同一套路径。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48"
+     fill="none" stroke="#1B7A5A" stroke-width="3"
+     stroke-linecap="round" stroke-linejoin="round">
+
+  <!-- 键帽 -->
+  <path d="M12,11 H36 A6,6 0 0 1 42,17 V27 A6,6 0 0 1 36,33 H12 A6,6 0 0 1 6,27 V17 A6,6 0 0 1 12,11 Z"/>
+
+  <!-- 字母 A -->
+  <g stroke-width="2.8">
+    <path d="M18.5,28 L24,16.5 L29.5,28"/>
+    <path d="M20.8,24.5 H27.2"/>
+  </g>
+
+  <!-- 笔迹 -->
+  <path d="M13,38.5 C17,42.5 21,35.5 25,38.5 C28,40.6 31,39.8 34,37.5" stroke-width="2.8"/>
+
+  <!-- 落点 -->
+  <path d="M36.8,36.9 L36.8,36.9" stroke="#FFC857" stroke-width="3.6"/>
+</svg>
