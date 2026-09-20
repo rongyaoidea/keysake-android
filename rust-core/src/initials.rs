@@ -70,7 +70,7 @@ const COMMON: &[&str] = &[
     "一点",
 ];
 
-fn is_common(word: &str) -> bool {
+pub fn is_common(word: &str) -> bool {
     COMMON.contains(&word)
 }
 /// 全表最多收录的声母串数量（防御内存）
@@ -107,16 +107,21 @@ fn build() -> Initials {
             if word.is_empty() || word.chars().count() > MAX_WORD_CHARS {
                 return;
             }
-            let syls = inputx_pinyin::segment(code).len();
+            // 与 lexgen 同一算法：取首选切分（音节数最少）的每个音节首字母。
+            // 旧实现按元音 split，复合韵母会切错（jintian -> jnn），导致「今天」等词进不了索引。
+            let Some(first) = inputx_pinyin::segment(code).first() else {
+                return;
+            };
+            let syls = first.syllables.len();
             if !(MIN_SYL..=MAX_SYL).contains(&syls) {
                 return;
             }
-            let initials: String = code
-                .split(['a', 'e', 'i', 'o', 'u'])
-                .filter(|s| !s.is_empty())
+            let initials: String = first
+                .syllables
+                .iter()
                 .filter_map(|s| s.chars().next())
                 .collect();
-            // 声母串必须与输入长度一致（无零声母字），避免误命中
+            // 声母串必须与音节数一致（每个音节恰好一个首字母），避免误命中
             if initials.chars().count() != syls {
                 return;
             }
@@ -169,6 +174,28 @@ pub fn candidates(input: &str, limit: usize) -> Vec<String> {
             out.push(w);
             if out.len() >= limit {
                 break;
+            }
+        }
+    }
+    out
+}
+
+/// 精确命中的简拼候选（带词频，常用词优先；不做前缀扩展）。
+/// 混简拼的声母串取词用：需要确切的等长词与词频打分，前缀扩展会混入不完整输入的词。
+pub fn exact_with_freq(input: &str, limit: usize) -> Vec<(String, u64)> {
+    let key = engine::normalize(input);
+    if key.len() < MIN_SYL || !key.chars().all(|c| c.is_ascii_lowercase()) {
+        return Vec::new();
+    }
+    let t = &table().table;
+    let mut out: Vec<(String, u64)> = Vec::new();
+    if let Some(v) = t.get(&key) {
+        for (f, w) in v {
+            if !out.iter().any(|(x, _)| x == w) {
+                out.push((w.clone(), *f));
+                if out.len() >= limit {
+                    break;
+                }
             }
         }
     }

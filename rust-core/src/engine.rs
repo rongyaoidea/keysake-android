@@ -343,7 +343,7 @@ pub(crate) fn lookup_cheap(eng: &PinyinEngine, compact: &str, limit: usize) -> V
 }
 
 /// 贪心切音节（用引擎的音节表，避免 segment() 在长串上枚举爆炸）。
-fn split_syllables(input: &str) -> Vec<&str> {
+pub(crate) fn split_syllables(input: &str) -> Vec<&str> {
     let mut out: Vec<&str> = Vec::new();
     let mut i = 0usize;
     let n = input.len();
