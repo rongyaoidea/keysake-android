@@ -24,16 +24,19 @@ object TextUtils {
         return out
     }
 
-    /** 光标前文本里“当前词/句块”的长度（滑动删除用）。 */
+    /** 词块边界：空白 + 常见中英标点（比句末符号更宽）。 */
+    private const val WORD_BOUNDARY = "，。！？；：、,.!?;:…—（）()《》「」【】\"'“”‘’"
+
+    /** 光标前文本里“当前词块”的长度（滑动删除用）：跳过尾部空白/标点，再回退到上一个边界。 */
     fun deleteWordLength(textBefore: String, max: Int = 40): Int {
         if (textBefore.isEmpty()) return 0
         val slice = textBefore.takeLast(max)
         var i = slice.length
-        while (i > 0 && slice[i - 1].isWhitespace()) i--
+        while (i > 0 && (slice[i - 1].isWhitespace() || slice[i - 1] in WORD_BOUNDARY)) i--
         val end = i
-        while (i > 0 && !slice[i - 1].isWhitespace() && slice[i - 1] !in TERMINATORS) i--
+        while (i > 0 && !slice[i - 1].isWhitespace() && slice[i - 1] !in WORD_BOUNDARY) i--
         val len = end - i
-        return if (len > 0) len else minOf(1, textBefore.length)
+        return if (len > 0) len else 1
     }
 
     /**

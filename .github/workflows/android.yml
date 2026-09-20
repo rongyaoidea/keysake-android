@@ -10,8 +10,11 @@ concurrency:
   group: android-${{ github.ref }}
   cancel-in-progress: true
 
+# 三个 job 相互独立、并行：
+# - rust : 引擎质量门禁（fmt / clippy / 单测）
+# - test : Kotlin 单测 + lint（失败只让本 job 变红，不阻塞产物）
+# - apk  : 只负责产出可安装 APK（.so 构建失败也照常出包，走 Kotlin 兜底）
 jobs:
-  # 门禁 1：Rust 引擎（格式 / lint / 单测）
   rust:
     runs-on: ubuntu-latest
     steps:
@@ -34,10 +37,41 @@ jobs:
       - name: cargo test
         run: cargo test --manifest-path rust-core/Cargo.toml --release
 
-  # 门禁 2：Android（Kotlin 单测 + lint + APK）
-  build-apk:
+  test:
     runs-on: ubuntu-latest
-    needs: rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android SDK packages
+        run: |
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      # 失败即 red（本 job 负责暴露问题），但不影响 apk job 出包
+      - name: Kotlin unit tests + lint
+        run: ./gradlew :app:testDebugUnitTest :app:lintDebug --stacktrace
+
+      - name: Upload test / lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          path: |
+            app/build/reports/tests/**
+            app/build/reports/lint-results-*.html
+
+  apk:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -55,16 +89,19 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Install Android SDK packages (runner already has SDK)
+      - name: Install Android SDK packages
         run: |
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
           sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;27.2.12479018"
 
+      # ---- 引擎 .so：失败不阻塞出包（APK 会走 Kotlin 兜底，仍可用）----
       - name: Install cargo-ndk
+        continue-on-error: true
         run: cargo install cargo-ndk --locked
 
       - name: Build Rust .so for 3 ABIs
+        continue-on-error: true
         working-directory: rust-core
         run: |
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
@@ -72,15 +109,24 @@ jobs:
           cargo ndk -o ../app/src/main/jniLibs \
             -t armeabi-v7a -t arm64-v8a -t x86_64 \
             build --release
-          # cargo-ndk 会把依赖中的 cdylib 一起拷进来，只保留本引擎，避免 APK 膨胀
+          # cargo-ndk 会把依赖中的 cdylib 一起拷进来，只保留本引擎
           find ../app/src/main/jniLibs -name '*.so' ! -name 'libtypesake_core.so' -delete
           find ../app/src/main/jniLibs -name '*.so' -exec ls -lh {} \;
+
+      - name: Check engine presence
+        run: |
+          if [ -f app/src/main/jniLibs/arm64-v8a/libtypesake_core.so ]; then
+            echo "engine: present"
+          else
+            echo "::warning title=Rust engine missing::libtypesake_core.so 未生成，APK 将运行在 Kotlin 兜底模式"
+          fi
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      - name: Kotlin unit tests + lint + assembleDebug
-        run: ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --stacktrace
+      # 只做构建，不跑测试：测试在 test job 里，失败也不影响这里出包
+      - name: Assemble debug APK
+        run: ./gradlew :app:assembleDebug --stacktrace -x lint -x test
 
       - name: Show APK size
         run: ls -lh app/build/outputs/apk/debug/*.apk
@@ -90,12 +136,3 @@ jobs:
         with:
           name: typesake-debug-apk
           path: app/build/outputs/apk/debug/*.apk
-
-      - name: Upload reports (tests / lint)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: reports
-          path: |
-            app/build/reports/tests/**
-            app/build/reports/lint-results-*.html

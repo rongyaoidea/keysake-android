@@ -33,17 +33,17 @@ class TypesakeCoreTest {
 
     @Test
     fun analyzeProtocolParsing() {
-        val corrected = TypesakeCore.parseMatch("1\u001Enihao\u001F你好\u001F你号", "nihap")
+        val corrected = TypesakeCore.parseMatch("1\u001Enihao\u001E你好\u001F你号", "nihap")
         assertTrue(corrected.corrected)
         assertFalse(corrected.remembered)
         assertEquals("nihao", corrected.matched)
         assertEquals(listOf("你好", "你号"), corrected.candidates)
 
-        val remembered = TypesakeCore.parseMatch("2\u001Enihap\u001F你好", "nihap")
+        val remembered = TypesakeCore.parseMatch("2\u001Enihap\u001E你好", "nihap")
         assertTrue(remembered.remembered)
         assertTrue(remembered.corrected)
 
-        val direct = TypesakeCore.parseMatch("0\u001Enihao\u001F你好", "nihao")
+        val direct = TypesakeCore.parseMatch("0\u001Enihao\u001E你好", "nihao")
         assertFalse(direct.corrected)
         assertEquals("nihao", direct.matched)
     }

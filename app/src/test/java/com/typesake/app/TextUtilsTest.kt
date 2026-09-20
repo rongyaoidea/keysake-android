@@ -36,9 +36,11 @@ class TextUtilsTest {
     fun deleteWordLengthStopsAtBoundaries() {
         assertEquals(0, TextUtils.deleteWordLength(""))
         assertEquals(2, TextUtils.deleteWordLength("你好"))
-        assertEquals(3, TextUtils.deleteWordLength("hello world"))
+        assertEquals(5, TextUtils.deleteWordLength("hello world"))
         assertEquals(2, TextUtils.deleteWordLength("你好，"))
-        assertEquals(3, TextUtils.deleteWordLength("hello   "))
+        assertEquals(5, TextUtils.deleteWordLength("hello   "))
+        assertEquals(2, TextUtils.deleteWordLength("你好。再见"))
+        assertEquals(1, TextUtils.deleteWordLength("   "))
     }
 
     @Test
