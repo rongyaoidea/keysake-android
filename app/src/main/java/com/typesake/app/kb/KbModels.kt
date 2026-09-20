@@ -176,7 +176,7 @@ object KbLayouts {
         KbRow(
             listOf(
                 action("abc", "ABC", 1.2f, KbAction.ShowLayer(KbLayer.LETTERS)),
-                action("sym2", "=\<", 1f, KbAction.ShowLayer(KbLayer.SYMBOLS2)),
+                action("sym2", "=#", 1f, KbAction.ShowLayer(KbLayer.SYMBOLS2)),
                 action("emoji2", "☺", 1f, KbAction.ShowLayer(KbLayer.EMOJI)),
                 action("clip", "📋", 1f, KbAction.ShowLayer(KbLayer.CLIPBOARD)),
                 action("phrases", "📝", 1f, KbAction.ShowLayer(KbLayer.PHRASES)),
