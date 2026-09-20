@@ -2,7 +2,10 @@ package com.typesake.app.kb
 
 /**
  * 键盘配色（纯 int，便于单测）。
- * 4 套配色（翠绿/暖阳/玫瑰/海洋）× 浅色/深色，中性键帽共用，强调色与顶部条随主题变化。
+ *
+ * 默认皮肤 = **珊瑚橙 + 奶油色 + 玻璃**（Claude 风格）：
+ * 奶油底、珊瑚强调色、半透明玻璃键帽与带描边的浮起面板。
+ * 其余 4 套为可选配色（翠绿/暖阳/玫瑰/海洋）。
  */
 data class KbColors(
     val bg: Int,
@@ -16,9 +19,13 @@ data class KbColors(
     val barBg: Int,
     val barText: Int,
     val hint: Int,
+    /** 玻璃皮肤的键帽/面板描边色（0 表示不使用） */
+    val glassBorder: Int = 0,
+    /** 是否玻璃皮肤（服务据此开启系统级背景模糊） */
+    val glass: Boolean = false,
 )
 
-enum class KbPalette { GREEN, SUNSET, ROSE, OCEAN }
+enum class KbPalette { CORAL, GREEN, SUNSET, ROSE, OCEAN }
 
 object KbThemes {
 
@@ -26,14 +33,57 @@ object KbThemes {
     const val THEME_LIGHT = 1
     const val THEME_DARK = 2
 
-    fun paletteOf(id: Int): KbPalette = KbPalette.entries.getOrElse(id) { KbPalette.GREEN }
+    /** Claude 珊瑚橙 */
+    const val CORAL = 0xFFD97757.toInt()
+    /** 奶油底 */
+    const val CREAM = 0xFFFAF9F5.toInt()
+    const val CREAM_DEEP = 0xFFF0EEE6.toInt()
+    const val WARM_BORDER = 0xFFE5E1D8.toInt()
+
+    fun paletteOf(id: Int): KbPalette = KbPalette.entries.getOrElse(id) { KbPalette.CORAL }
 
     /** 纯函数：从 Configuration.uiMode 判断夜间（UI_MODE_NIGHT_MASK=0x30, NIGHT_YES=0x20）。 */
     fun isNight(uiMode: Int): Boolean = (uiMode and 0x30) == 0x20
 
-    /** 浅色底（中性色共用）。 */
+    // ---------------- 默认皮肤：珊瑚橙 + 奶油 + 玻璃 ----------------
+
+    private fun coralLight(): KbColors = KbColors(
+        bg = 0xB3F5F3EC.toInt(),          // 奶油玻璃
+        key = 0xE6FFFFFF.toInt(),          // 半透明白键帽
+        keyPressed = 0xCCF3E1D8.toInt(),   // 按下：珊瑚浅晕
+        keyText = 0xFF2A2724.toInt(),
+        actionKey = 0x99EDE9DF.toInt(),
+        actionText = 0xFF3A3631.toInt(),
+        accent = CORAL,
+        accentText = 0xFFFFFFFF.toInt(),
+        barBg = 0xCCFAF9F5.toInt(),
+        barText = 0xFF3A2A22.toInt(),
+        hint = 0xFF8A8377.toInt(),
+        glassBorder = 0x66FFFFFF.toInt(),
+        glass = true,
+    )
+
+    private fun coralDark(): KbColors = KbColors(
+        bg = 0xB31F1D1A.toInt(),
+        key = 0xE6332E29.toInt(),
+        keyPressed = 0xCC4A4038.toInt(),
+        keyText = 0xFFF5F1EC.toInt(),
+        actionKey = 0x992A2622.toInt(),
+        actionText = 0xFFE8E2DA.toInt(),
+        accent = CORAL,
+        accentText = 0xFFFFFFFF.toInt(),
+        barBg = 0xCC26221F.toInt(),
+        barText = 0xFFF1E4DA.toInt(),
+        hint = 0xFF9C948A.toInt(),
+        glassBorder = 0x33FFFFFF.toInt(),
+        glass = true,
+    )
+
+    // ---------------- 可选配色 ----------------
+
     private fun lightBase(p: KbPalette): KbColors {
         val (accent, barBg, barText) = when (p) {
+            KbPalette.CORAL -> Triple(CORAL, 0xFFF7EDE6.toInt(), 0xFF4A2C1E.toInt())
             KbPalette.GREEN -> Triple(0xFF1B7A5A.toInt(), 0xFFE7F4EC.toInt(), 0xFF14432F.toInt())
             KbPalette.SUNSET -> Triple(0xFFB4560E.toInt(), 0xFFFDEEE0.toInt(), 0xFF5A2A06.toInt())
             KbPalette.ROSE -> Triple(0xFFB03060.toInt(), 0xFFFDECF2.toInt(), 0xFF55142E.toInt())
@@ -54,9 +104,9 @@ object KbThemes {
         )
     }
 
-    /** 深色底。 */
     private fun darkBase(p: KbPalette): KbColors {
         val (accent, barBg, barText) = when (p) {
+            KbPalette.CORAL -> Triple(CORAL, 0xFF2A221E.toInt(), 0xFFF0DED2.toInt())
             KbPalette.GREEN -> Triple(0xFF2FBF87.toInt(), 0xFF17251F.toInt(), 0xFFBDE9D5.toInt())
             KbPalette.SUNSET -> Triple(0xFFE08A45.toInt(), 0xFF2A1F14.toInt(), 0xFFF2D6B8.toInt())
             KbPalette.ROSE -> Triple(0xFFE06A96.toInt(), 0xFF2A1620.toInt(), 0xFFF5CBDA.toInt())
@@ -83,13 +133,16 @@ object KbThemes {
             THEME_DARK -> true
             else -> night
         }
-        return if (dark) darkBase(palette) else lightBase(palette)
+        return when (palette) {
+            KbPalette.CORAL -> if (dark) coralDark() else coralLight()
+            else -> if (dark) darkBase(palette) else lightBase(palette)
+        }
     }
 
     fun resolve(paletteId: Int, themeMode: Int, night: Boolean): KbColors =
         resolve(paletteOf(paletteId), themeMode, night)
 
-    /** 4 套配色预览色（设置页色块）。 */
+    /** 配色预览色（设置页色块 / Compose 主题用）。 */
     fun accentOf(palette: KbPalette, night: Boolean): Int =
-        if (night) darkBase(palette).accent else lightBase(palette).accent
+        resolve(palette, THEME_SYSTEM, night).accent
 }

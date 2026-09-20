@@ -13,12 +13,12 @@ class KbThemeTest {
     @Test
     fun followsSystemWhenModeIsSystem() {
         assertEquals(
-            KbThemes.resolve(KbPalette.GREEN, KbThemes.THEME_DARK, false),
-            KbThemes.resolve(KbPalette.GREEN, KbThemes.THEME_SYSTEM, true),
+            KbThemes.resolve(KbPalette.CORAL, KbThemes.THEME_DARK, false),
+            KbThemes.resolve(KbPalette.CORAL, KbThemes.THEME_SYSTEM, true),
         )
         assertEquals(
-            KbThemes.resolve(KbPalette.GREEN, KbThemes.THEME_LIGHT, true),
-            KbThemes.resolve(KbPalette.GREEN, KbThemes.THEME_SYSTEM, false),
+            KbThemes.resolve(KbPalette.CORAL, KbThemes.THEME_LIGHT, true),
+            KbThemes.resolve(KbPalette.CORAL, KbThemes.THEME_SYSTEM, false),
         )
     }
 
@@ -46,10 +46,29 @@ class KbThemeTest {
     }
 
     @Test
+    fun defaultPaletteIsCoralGlass() {
+        assertEquals(KbPalette.CORAL, KbThemes.paletteOf(0))
+        assertEquals(KbPalette.CORAL, KbThemes.paletteOf(99))
+        val light = KbThemes.resolve(KbPalette.CORAL, KbThemes.THEME_LIGHT, false)
+        assertTrue("default skin must be glass", light.glass)
+        assertNotEquals(0, light.glassBorder)
+        assertEquals(KbThemes.CORAL, light.accent)
+        val dark = KbThemes.resolve(KbPalette.CORAL, KbThemes.THEME_DARK, true)
+        assertTrue(dark.glass)
+        assertEquals(KbThemes.CORAL, dark.accent)
+    }
+
+    @Test
+    fun nonGlassPalettesStayFlat() {
+        for (p in listOf(KbPalette.GREEN, KbPalette.SUNSET, KbPalette.ROSE, KbPalette.OCEAN)) {
+            assertFalse(p.name, KbThemes.resolve(p, KbThemes.THEME_LIGHT, false).glass)
+        }
+    }
+
+    @Test
     fun paletteLookupIsBoundsSafe() {
-        assertEquals(KbPalette.GREEN, KbThemes.paletteOf(0))
-        assertEquals(KbPalette.OCEAN, KbThemes.paletteOf(3))
-        assertEquals(KbPalette.GREEN, KbThemes.paletteOf(99))
-        assertEquals(KbPalette.GREEN, KbThemes.paletteOf(-1))
+        assertEquals(KbPalette.CORAL, KbThemes.paletteOf(0))
+        assertEquals(KbPalette.OCEAN, KbThemes.paletteOf(4))
+        assertEquals(KbPalette.CORAL, KbThemes.paletteOf(-1))
     }
 }

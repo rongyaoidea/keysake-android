@@ -93,7 +93,11 @@ class KeyboardView(
         this.clipPhrases = phrases
         dismissPopups()
         rows.removeAllViews()
-        setBackgroundColor(colors.bg)
+        if (colors.glass) {
+            background = plate(colors.bg, dp(20), colors.glassBorder)
+        } else {
+            setBackgroundColor(colors.bg)
+        }
         when (this.layer) {
             KbLayer.EMOJI -> buildEmojiPanel()
             KbLayer.CLIPBOARD -> buildClipboardPanel()
@@ -231,7 +235,7 @@ class KeyboardView(
                         gravity = Gravity.CENTER_VERTICAL
                         maxLines = 1
                         setPadding(dp(12), 0, dp(12), 0)
-                        background = rounded(colors.key, dp(6))
+                        background = plate(colors.key, dp(10), colors.glassBorder)
                         setOnClickListener { listener?.onInsert(item) }
                     },
                     LayoutParams(LayoutParams.MATCH_PARENT, rowHeightPx).apply {
@@ -279,7 +283,7 @@ class KeyboardView(
                         gravity = Gravity.CENTER_VERTICAL
                         maxLines = 1
                         setPadding(dp(12), 0, dp(12), 0)
-                        background = rounded(colors.key, dp(6))
+                        background = plate(colors.key, dp(10), colors.glassBorder)
                         setOnClickListener { listener?.onInsert(cn) }
                         setOnLongClickListener {
                             if (en.isNotBlank()) listener?.onInsert(en)
@@ -317,7 +321,7 @@ class KeyboardView(
                 text = item.label
                 gravity = Gravity.CENTER
                 setTextColor(colors.actionText)
-                background = rounded(colors.actionKey, dp(6))
+                background = plate(colors.actionKey, dp(10), colors.glassBorder)
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
                 setOnClickListener { item.onClick() }
             }
@@ -330,6 +334,16 @@ class KeyboardView(
         GradientDrawable().apply {
             setColor(color)
             cornerRadius = radius.toFloat()
+        }
+
+    /** 玻璃皮肤：键帽/面板带 1dp 描边，形成"浮起玻璃片"的观感。 */
+    private fun plate(color: Int, radius: Int, borderColor: Int): GradientDrawable =
+        GradientDrawable().apply {
+            setColor(color)
+            cornerRadius = radius.toFloat()
+            if (borderColor != 0) {
+                setStroke(dp(1), borderColor)
+            }
         }
 
     private fun keyBackground(pressed: GradientDrawable): StateListDrawable = StateListDrawable().apply {
@@ -347,10 +361,15 @@ class KeyboardView(
             isClickable = true
             setTextColor(if (key.isActionKey) colors.actionText else colors.keyText)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, if (key.isActionKey) 13f else 18f)
-            val idle = rounded(if (key.isActionKey) colors.actionKey else colors.key, dp(7))
-            val down = rounded(
+            val idle = plate(
+                if (key.isActionKey) colors.actionKey else colors.key,
+                dp(if (colors.glass) 11 else 7),
+                colors.glassBorder,
+            )
+            val down = plate(
                 if (key.isActionKey) colors.actionKey else colors.accent,
-                dp(7)
+                dp(if (colors.glass) 11 else 7),
+                colors.glassBorder,
             )
             background = keyBackground(down).apply {
                 addState(intArrayOf(), idle)
@@ -479,7 +498,7 @@ class KeyboardView(
                 this.text = text
                 gravity = Gravity.CENTER
                 setTextColor(colors.keyText)
-                background = rounded(colors.key, dp(7))
+                background = plate(colors.key, dp(11), colors.glassBorder)
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
             },
             dp(40),
@@ -505,7 +524,7 @@ class KeyboardView(
                     text = item
                     gravity = Gravity.CENTER
                     setTextColor(colors.keyText)
-                    background = rounded(colors.key, dp(6))
+                    background = plate(colors.key, dp(10), colors.glassBorder)
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
                     setOnClickListener {
                         listener?.onInsert(item)

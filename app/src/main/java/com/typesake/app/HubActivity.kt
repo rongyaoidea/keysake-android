@@ -4,7 +4,6 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,8 +17,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -27,6 +24,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.typesake.app.ui.GlassCard
+import com.typesake.app.ui.TypesakeTheme
 
 /** 学习中心：收藏列表 + 点击看语法讲解 + 清空（回到前台自动刷新）。 */
 class HubActivity : ComponentActivity() {
@@ -38,7 +37,7 @@ class HubActivity : ComponentActivity() {
         TypesakeAssets.ensureEnglishDict(this)
         TypesakeCore.init(filesDir.absolutePath)
         setContent {
-            MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
+            TypesakeTheme(TypesakePrefs(this@HubActivity).palette) {
                 Surface(Modifier.fillMaxSize()) {
                     var saved by remember(tick) { mutableStateOf(TypesakeCore.list()) }
                     var expanded by remember { mutableStateOf<TypesakeCore.SavedPhrase?>(null) }
@@ -67,7 +66,7 @@ class HubActivity : ComponentActivity() {
                             style = MaterialTheme.typography.bodySmall,
                         )
                         if (saved.isEmpty()) {
-                            Card(Modifier.fillMaxWidth()) {
+                            GlassCard(Modifier.fillMaxWidth()) {
                                 Text(
                                     "还没有收藏。去键盘打拼音，点 ★ 或双击空格收藏；\n" +
                                         "例如：nihao → 你好 → Hello!",
@@ -77,7 +76,7 @@ class HubActivity : ComponentActivity() {
                         }
                         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             items(saved) { p ->
-                                Card(
+                                GlassCard(
                                     Modifier.fillMaxWidth().clickable {
                                         expanded = if (expanded == p) null else p
                                     }

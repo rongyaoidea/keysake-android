@@ -108,10 +108,32 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         colors = resolveColors()
+        applyGlassBlur()
         if (::keyboard.isInitialized) {
             keyboard.render(kind, layer, colors, prefs.keyHeightDp, clipItems.toList(), pairList())
             refreshBars()
         }
+    }
+
+    /**
+     * 玻璃皮肤：API 31+ 打开系统级背景模糊（跨窗口模糊未开启时系统会忽略，不会报错）。
+     * 低版本退化为半透明（alpha）玻璃观感。
+     */
+    private fun applyGlassBlur() {
+        val dialog = window ?: return
+        val attrs = dialog.window?.attributes ?: return
+        if (colors.glass) {
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                attrs.flags = attrs.flags or android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND
+                attrs.blurBehindRadius = dp(20)
+            }
+        } else {
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                attrs.flags = attrs.flags and android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND.inv()
+                attrs.blurBehindRadius = 0
+            }
+        }
+        dialog.window?.attributes = attrs
     }
 
     override fun onStartInput(info: EditorInfo?, restarting: Boolean) {
@@ -234,7 +256,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     private fun renderCandidates() {
         if (!::candidateRow.isInitialized) return
         candidateRow.removeAllViews()
-        candidateScroll.setBackgroundColor(colors.barBg)
+        applyBarBackground(candidateScroll)
 
         // 1) 拼音输入中
         if (pinyin.isNotEmpty()) {
@@ -301,7 +323,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     private fun renderEnglish() {
         if (!::englishRow.isInitialized) return
         englishRow.removeAllViews()
-        englishScroll.setBackgroundColor(colors.barBg)
+        applyBarBackground(englishScroll)
 
         if (englishChips.isEmpty()) {
             englishRow.addView(
@@ -387,6 +409,19 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
             }
         }
         layoutParams = chipParams()
+    }
+
+    /** 玻璃皮肤下面板用圆角+描边；普通皮肤仍用纯色。 */
+    private fun applyBarBackground(view: android.view.View) {
+        if (colors.glass) {
+            view.background = GradientDrawable().apply {
+                setColor(colors.barBg)
+                cornerRadius = dp(14).toFloat()
+                setStroke(dp(1), colors.glassBorder)
+            }
+        } else {
+            view.setBackgroundColor(colors.barBg)
+        }
     }
 
     private fun chipParams(): LinearLayout.LayoutParams = LinearLayout.LayoutParams(

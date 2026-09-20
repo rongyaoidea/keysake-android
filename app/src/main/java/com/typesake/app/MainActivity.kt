@@ -6,7 +6,6 @@ import android.provider.Settings
 import androidx.compose.foundation.clickable
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -28,8 +27,6 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -41,6 +38,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import com.typesake.app.ui.GlassCard
+import com.typesake.app.ui.TypesakeTheme
 
 /** 首页：状态 + 启用指引 + 试打 + 设置 + 隐私说明。 */
 class MainActivity : ComponentActivity() {
@@ -49,10 +48,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         TypesakeAssets.ensureEnglishDict(this)
         TypesakeCore.init(filesDir.absolutePath)
+        val prefs = TypesakePrefs(this)
         setContent {
-            MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
+            var paletteId by remember { mutableIntStateOf(prefs.palette) }
+            TypesakeTheme(paletteId) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    SetupScreen()
+                    SetupScreen(paletteId) { paletteId = it }
                 }
             }
         }
@@ -60,7 +61,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun SetupScreen() {
+private fun SetupScreen(paletteId: Int, onPaletteChange: (Int) -> Unit) {
     val context = LocalContext.current
     val prefs = remember { TypesakePrefs(context) }
 
@@ -70,7 +71,7 @@ private fun SetupScreen() {
     var sound by remember { mutableStateOf(prefs.sound) }
     var preview by remember { mutableStateOf(prefs.keyPreview) }
     var clipboard by remember { mutableStateOf(prefs.clipboardHistory) }
-    var palette by remember { mutableIntStateOf(prefs.palette) }
+    var palette by remember { mutableIntStateOf(paletteId) }
     var fuzzy by remember { mutableStateOf(prefs.fuzzy) }
     var correction by remember { mutableStateOf(prefs.correction) }
     var statTick by remember { mutableIntStateOf(0) }
@@ -107,7 +108,7 @@ private fun SetupScreen() {
         )
 
         val stats = remember(statTick) { TypesakeCore.stats() }
-        Card {
+        GlassCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("学习数据", style = MaterialTheme.typography.titleMedium)
                 Text(
@@ -118,7 +119,7 @@ private fun SetupScreen() {
                 Text("点此刷新", style = MaterialTheme.typography.bodySmall, modifier = Modifier.clickable { statTick++ })
             }
         }
-        Card {
+        GlassCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("启用三步走", style = MaterialTheme.typography.titleMedium)
                 Text("1. 打开系统输入法设置，启用「Typesake 输入法」")
@@ -144,7 +145,7 @@ private fun SetupScreen() {
             modifier = Modifier.fillMaxWidth(),
         )
         val english = remember(trial) { TypesakeCore.suggest(trial) }
-        Card {
+        GlassCard {
             Column(Modifier.padding(14.dp)) {
                 Text("英文伴学", style = MaterialTheme.typography.titleSmall)
                 Text(
@@ -185,13 +186,14 @@ private fun SetupScreen() {
         }
         Text("配色", style = MaterialTheme.typography.bodyMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("翠绿" to 0, "暖阳" to 1, "玫瑰" to 2, "海洋" to 3).forEach { (label, id) ->
+            listOf("珊瑚" to 0, "翠绿" to 1, "暖阳" to 2, "玫瑰" to 3, "海洋" to 4).forEach { (label, id) ->
                 if (palette == id) {
                     Button(onClick = {}) { Text(label) }
                 } else {
                     OutlinedButton(onClick = {
                         palette = id
                         prefs.palette = id
+                        onPaletteChange(id)
                     }) { Text(label) }
                 }
             }
@@ -228,7 +230,7 @@ private fun SetupScreen() {
         )
 
         Spacer(Modifier.height(4.dp))
-        Card {
+        GlassCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("隐私说明", style = MaterialTheme.typography.titleSmall)
                 Text("· 本应用不申请网络权限，输入内容不出设备")

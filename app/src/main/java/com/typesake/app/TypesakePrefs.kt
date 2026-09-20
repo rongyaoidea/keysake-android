@@ -34,10 +34,10 @@ class TypesakePrefs(context: Context) {
         get() = sp.getInt(KEY_ONE_HAND, 0)
         set(v) = sp.edit().putInt(KEY_ONE_HAND, v.coerceIn(0, 2)).apply()
 
-    /** 配色（0 翠绿 1 暖阳 2 玫瑰 3 海洋） */
+    /** 配色（0 珊瑚/默认玻璃皮肤 1 翠绿 2 暖阳 3 玫瑰 4 海洋） */
     var palette: Int
         get() = sp.getInt(KEY_PALETTE, 0)
-        set(v) = sp.edit().putInt(KEY_PALETTE, v.coerceIn(0, 3)).apply()
+        set(v) = sp.edit().putInt(KEY_PALETTE, v.coerceIn(0, 4)).apply()
 
     /** 模糊音（z/zh、n/l、an/ang…） */
     var fuzzy: Boolean
