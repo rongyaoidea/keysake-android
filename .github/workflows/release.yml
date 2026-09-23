@@ -9,7 +9,58 @@ permissions:
   contents: write
 
 jobs:
+  # 发布前置闸门：fmt/clippy/引擎单测/Kotlin 单测+lint 任一失败都不许出 Release 包
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core -> target
+
+      - name: cargo fmt --check
+        run: cargo fmt --manifest-path rust-core/Cargo.toml -- --check
+
+      - name: cargo clippy -D warnings
+        run: cargo clippy --manifest-path rust-core/Cargo.toml --all-targets -- -D warnings
+
+      # 生成 lex.bin，让混简拼等端到端用例在 CI 真正执行（失败则用例自动跳过）
+      - name: "rust: build lexicon for tests"
+        continue-on-error: true
+        run: |
+          curl -sSL --max-time 120 -o /tmp/jieba_dict.txt \
+            https://raw.githubusercontent.com/fxsjy/jieba/master/jieba/dict.txt
+          cargo run --release --manifest-path rust-core/Cargo.toml --bin lexgen -- \
+            --input /tmp/jieba_dict.txt --out app/src/main/assets/lex.bin
+
+      - name: cargo test
+        run: cargo test --manifest-path rust-core/Cargo.toml --release
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android SDK packages
+        run: |
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Kotlin unit tests + lint
+        run: ./gradlew :app:testDebugUnitTest :app:lintDebug --stacktrace
+
   release-apk:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -73,26 +124,31 @@ jobs:
           # cargo-ndk 会把依赖中的 cdylib 一起拷进来，只保留本引擎，避免 APK 膨胀
           find ../app/src/main/jniLibs -name '*.so' ! -name 'libtypesake_core.so' -delete
 
-      # 签名（可选）：仓库没配 secrets 时产出未签名 APK，流程仍然成功
-      - name: Prepare signing (optional)
+      # 签名：tag 发布必须 4 个 secrets 齐全（缺任一直接失败，禁止发未签名包）；
+      # workflow_dispatch 手动跑且没配 secrets 时允许出未签名 APK（仅本地调试用途）
+      - name: Prepare signing
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/typesake.jks"
-            {
-              echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/typesake.jks"
-              echo "ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
-              echo "ANDROID_KEY_ALIAS=$KEY_ALIAS"
-              echo "ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
-            } >> "$GITHUB_ENV"
-            echo "signing: enabled"
-          else
-            echo "signing: skipped (no secrets configured)"
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+              echo "::error title=Missing signing secrets::tag 发布要求 ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD 全部配置"
+              exit 1
+            fi
+            echo "signing: skipped (workflow_dispatch without secrets; unsigned APK)"
+            exit 0
           fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/typesake.jks"
+          {
+            echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/typesake.jks"
+            echo "ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "ANDROID_KEY_ALIAS=$KEY_ALIAS"
+            echo "ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+          echo "signing: enabled"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
@@ -105,6 +161,19 @@ jobs:
 
       - name: Show APK
         run: ls -lh app/build/outputs/apk/release/*.apk
+
+      # 三个 ABI 的引擎 .so 必须全部打进 APK，否则真机会「引擎未加载」
+      - name: Assert APK contains all ABIs
+        run: |
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            if unzip -l "$APK" | grep -q "lib/$abi/libtypesake_core.so"; then
+              echo "apk: $abi ok"
+            else
+              echo "::error title=APK missing ABI::$abi 未打进 APK"
+              exit 1
+            fi
+          done
 
       # 每次发布都打印签名证书指纹：日志可审计，确保历次发布同一签名
       - name: Verify APK signature

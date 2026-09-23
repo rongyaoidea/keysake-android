@@ -1,6 +1,9 @@
 //! 收藏、学习快照、设置与统计的持久化（单文件 JSON + 原子写）。
 //!
 //! 原子写：先写 `<file>.json.tmp` 再 `rename`，避免进程被杀时留下半截 JSON。
+//! 锁纪律：全局锁内只改内存并生成快照，落盘（含 fsync）一律 drop 锁后执行，
+//! 避免文件 IO 把并发的候选查询顶住；锁毒化（持锁线程 panic）用 `into_inner`
+//! 恢复数据继续用，不让一次 panic 导致此后所有存储操作永久报错。
 
 use crate::{biglex, engine, english, gramidx, s2t, sentbank, userdic};
 use serde::{Deserialize, Serialize};
@@ -153,7 +156,13 @@ fn sync_memory(items: &[SavedPhrase]) {
     );
 }
 
-fn write_db_locked(s: &Store) -> Result<(), String> {
+/// 取 store 锁；毒化时恢复数据继续（`into_inner`），不让存储永久报错。
+fn store_guard() -> std::sync::MutexGuard<'static, Store> {
+    store().lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// 锁内生成落盘快照（目录 + 序列化结构），不含任何 IO。
+fn snapshot(s: &Store) -> (String, Db) {
     let l0 = engine::export_l0();
     let corrections: Vec<Correction> = engine::export_learned()
         .into_iter()
@@ -173,8 +182,14 @@ fn write_db_locked(s: &Store) -> Result<(), String> {
         user_words: s.user_words.clone(),
         mail_domains: userdic::domains_snapshot(),
     };
-    let data = serde_json::to_vec(&db).map_err(|e| e.to_string())?;
-    write_atomic(&db_path(&s.dir), &data).map_err(|e| e.to_string())
+    (s.dir.clone(), db)
+}
+
+/// 在锁外落盘（含 fsync）。调用方必须先 `drop` 锁再调用，
+/// 避免文件 IO 期间持有全局 store 锁。
+fn write_snapshot(snap: &(String, Db)) -> Result<(), String> {
+    let data = serde_json::to_vec(&snap.1).map_err(|e| e.to_string())?;
+    write_atomic(&db_path(&snap.0), &data).map_err(|e| e.to_string())
 }
 
 fn empty_db() -> Db {
@@ -220,7 +235,7 @@ pub fn init(dir: &str) -> Result<(usize, usize), String> {
         db.settings.shuangpin,
     );
 
-    let mut s = store().lock().map_err(|e| e.to_string())?;
+    let mut s = store_guard();
     s.dir = dir.to_string();
     s.saved = db.saved;
     s.settings = db.settings;
@@ -234,10 +249,7 @@ pub fn init(dir: &str) -> Result<(usize, usize), String> {
 }
 
 pub fn settings() -> Settings {
-    store()
-        .lock()
-        .map(|s| s.settings.clone())
-        .unwrap_or_default()
+    store_guard().settings.clone()
 }
 
 /// 写入输入选项并落盘。
@@ -248,19 +260,19 @@ pub fn set_settings(
     script: u8,
 ) -> Result<(), String> {
     engine::set_options(fuzzy, correction, shuangpin);
-    let mut s = store().lock().map_err(|e| e.to_string())?;
+    let mut s = store_guard();
     s.settings = Settings {
         fuzzy,
         correction,
         shuangpin,
         script,
     };
-    let dir = s.dir.clone();
-    write_db_locked(&s)?;
+    let snap = snapshot(&s);
     drop(s);
+    write_snapshot(&snap)?;
     let _ = s2t::load_dicts(
-        &Path::new(&dir).join("s2t.tsv").to_string_lossy(),
-        &Path::new(&dir).join("t2s.tsv").to_string_lossy(),
+        &Path::new(&snap.0).join("s2t.tsv").to_string_lossy(),
+        &Path::new(&snap.0).join("t2s.tsv").to_string_lossy(),
         script == 1,
     );
     Ok(())
@@ -272,7 +284,7 @@ pub fn update_saved(chinese: &str, old_english: &str, new_english: &str) -> Resu
     if cn.is_empty() || new.is_empty() {
         return Err("中文与新英文都不能为空".to_string());
     }
-    let mut s = store().lock().map_err(|e| e.to_string())?;
+    let mut s = store_guard();
     let mut hit = false;
     for p in s.saved.iter_mut() {
         if p.chinese == cn && p.english == old {
@@ -294,8 +306,11 @@ pub fn update_saved(chinese: &str, old_english: &str, new_english: &str) -> Resu
                 true
             }
         });
-        write_db_locked(&s)?;
-        sync_memory(&s.saved);
+        let snap = snapshot(&s);
+        let saved = s.saved.clone();
+        drop(s);
+        write_snapshot(&snap)?;
+        sync_memory(&saved);
     }
     Ok(hit)
 }
@@ -303,20 +318,26 @@ pub fn update_saved(chinese: &str, old_english: &str, new_english: &str) -> Resu
 /// 删除单条收藏。
 pub fn delete_saved(chinese: &str, english: &str) -> Result<bool, String> {
     let (cn, en) = (chinese.trim(), english.trim());
-    let mut s = store().lock().map_err(|e| e.to_string())?;
+    let mut s = store_guard();
     let before = s.saved.len();
     s.saved.retain(|p| !(p.chinese == cn && p.english == en));
     let hit = s.saved.len() != before;
     if hit {
-        write_db_locked(&s)?;
-        sync_memory(&s.saved);
+        let snap = snapshot(&s);
+        let saved = s.saved.clone();
+        drop(s);
+        write_snapshot(&snap)?;
+        sync_memory(&saved);
     }
     Ok(hit)
 }
 
 /// 记一次上屏（词数 + 当天活跃）。
+///
+/// 只改内存态、不立即落盘：每次选词（pick）都会随 L0 一起写盘，
+/// 收尾时 [`persist`] 再兜底——把原来「一次上屏双写」合并成最多一次。
 pub fn bump_stats(words: u64, today: &str) -> Result<(), String> {
-    let mut s = store().lock().map_err(|e| e.to_string())?;
+    let mut s = store_guard();
     s.stats.words = s.stats.words.saturating_add(words);
     let day = today.trim();
     if !day.is_empty() && !s.stats.days.iter().any(|d| d == day) {
@@ -326,15 +347,15 @@ pub fn bump_stats(words: u64, today: &str) -> Result<(), String> {
             s.stats.days.drain(0..cut);
         }
     }
-    write_db_locked(&s)
+    Ok(())
 }
 
 pub fn stats() -> Stats {
-    store().lock().map(|s| s.stats.clone()).unwrap_or_default()
+    store_guard().stats.clone()
 }
 
 pub fn saved_count() -> usize {
-    store().lock().map(|s| s.saved.len()).unwrap_or(0)
+    store_guard().saved.len()
 }
 
 /// 收藏（同 中文+英文 去重，更新时间戳）。
@@ -343,7 +364,7 @@ pub fn save_phrase(chinese: &str, english: &str) -> Result<SavedPhrase, String> 
     if cn.is_empty() {
         return Err("中文不能为空".to_string());
     }
-    let mut s = store().lock().map_err(|e| e.to_string())?;
+    let mut s = store_guard();
     if let Some(p) = s
         .saved
         .iter_mut()
@@ -351,7 +372,9 @@ pub fn save_phrase(chinese: &str, english: &str) -> Result<SavedPhrase, String> 
     {
         p.saved_at = now_secs();
         let out = p.clone();
-        write_db_locked(&s)?;
+        let snap = snapshot(&s);
+        drop(s);
+        write_snapshot(&snap)?;
         return Ok(out);
     }
     let p = SavedPhrase {
@@ -360,23 +383,28 @@ pub fn save_phrase(chinese: &str, english: &str) -> Result<SavedPhrase, String> 
         saved_at: now_secs(),
     };
     s.saved.push(p.clone());
-    write_db_locked(&s)?;
-    sync_memory(&s.saved);
+    let snap = snapshot(&s);
+    let saved = s.saved.clone();
+    drop(s);
+    write_snapshot(&snap)?;
+    sync_memory(&saved);
     Ok(p)
 }
 
 pub fn list_saved() -> Vec<SavedPhrase> {
-    let mut items = store().lock().map(|s| s.saved.clone()).unwrap_or_default();
+    let mut items = store_guard().saved.clone();
     items.sort_by_key(|p| std::cmp::Reverse(p.saved_at));
     items
 }
 
 pub fn clear_saved() -> Result<usize, String> {
-    let mut s = store().lock().map_err(|e| e.to_string())?;
+    let mut s = store_guard();
     let n = s.saved.len();
     s.saved.clear();
-    write_db_locked(&s)?;
-    sync_memory(&s.saved);
+    let snap = snapshot(&s);
+    drop(s);
+    write_snapshot(&snap)?;
+    sync_memory(&[]);
     Ok(n)
 }
 
@@ -386,7 +414,7 @@ pub fn import_names(text: &str) -> Result<usize, String> {
     if names.is_empty() {
         return Err("没有解析到姓名（每行一个，或用逗号分隔）".to_string());
     }
-    let mut s = store().lock().map_err(|e| e.to_string())?;
+    let mut s = store_guard();
     let mut added = 0usize;
     for name in names {
         let Some(py) = userdic::name_to_pinyin(&name) else {
@@ -401,15 +429,14 @@ pub fn import_names(text: &str) -> Result<usize, String> {
             break;
         }
     }
-    write_db_locked(&s)?;
+    let snap = snapshot(&s);
+    drop(s);
+    write_snapshot(&snap)?;
     Ok(added)
 }
 
 pub fn user_words() -> Vec<(String, String)> {
-    store()
-        .lock()
-        .map(|s| s.user_words.clone())
-        .unwrap_or_default()
+    store_guard().user_words.clone()
 }
 
 /// 命中给定拼音（精确或前缀）的姓名，最多 limit 条。
@@ -418,9 +445,7 @@ pub fn user_words_for(pinyin: &str, limit: usize) -> Vec<String> {
     if key.is_empty() {
         return Vec::new();
     }
-    let Ok(s) = store().lock() else {
-        return Vec::new();
-    };
+    let s = store_guard();
     let mut out: Vec<String> = Vec::new();
     for (py, word) in s.user_words.iter().filter(|(py, _)| py == &key) {
         let _ = py;
@@ -447,18 +472,22 @@ pub fn user_words_for(pinyin: &str, limit: usize) -> Vec<String> {
 }
 
 pub fn clear_user_words() -> usize {
-    let Ok(mut s) = store().lock() else { return 0 };
+    let mut s = store_guard();
     let n = s.user_words.len();
     s.user_words.clear();
-    let _ = write_db_locked(&s);
+    let snap = snapshot(&s);
+    drop(s);
+    let _ = write_snapshot(&snap);
     n
 }
 
 /// 记住邮箱域名（用户点过哪个后缀）。
 pub fn remember_mail_domain(domain: &str) -> Result<usize, String> {
     userdic::remember_domain(domain);
-    let s = store().lock().map_err(|e| e.to_string())?;
-    write_db_locked(&s)?;
+    let s = store_guard();
+    let snap = snapshot(&s);
+    drop(s);
+    write_snapshot(&snap)?;
     Ok(userdic::domains_snapshot().len())
 }
 
@@ -468,7 +497,7 @@ pub fn mail_domains() -> Vec<(String, u32)> {
 
 /// 导出整库 JSON（本地备份，无网络无权限）。
 pub fn export_json() -> Result<String, String> {
-    let s = store().lock().map_err(|e| e.to_string())?;
+    let s = store_guard();
     let l0 = engine::export_l0();
     let db = Db {
         version: 3,
@@ -493,10 +522,7 @@ pub fn export_json() -> Result<String, String> {
 /// 从 JSON 恢复整库（覆盖当前数据），返回 (收藏数, pins 数)。
 pub fn import_json(text: &str) -> Result<(usize, usize), String> {
     serde_json::from_str::<Db>(text).map_err(|e| format!("JSON 解析失败：{e}"))?;
-    let dir = {
-        let s = store().lock().map_err(|e| e.to_string())?;
-        s.dir.clone()
-    };
+    let dir = store_guard().dir.clone();
     if dir.is_empty() {
         return Err("存储目录未初始化".to_string());
     }
@@ -504,13 +530,15 @@ pub fn import_json(text: &str) -> Result<(usize, usize), String> {
     init(&dir)
 }
 
-/// 学习/设置数据落盘（选词、纠错记忆后调用）。
+/// 学习/设置数据落盘（选词、纠错记忆、收尾 flush 时调用）。锁外写盘。
 pub fn persist() -> Result<(), String> {
-    let s = store().lock().map_err(|e| e.to_string())?;
+    let s = store_guard();
     if s.dir.is_empty() {
         return Ok(());
     }
-    write_db_locked(&s)
+    let snap = snapshot(&s);
+    drop(s);
+    write_snapshot(&snap)
 }
 
 #[cfg(test)]

@@ -52,19 +52,23 @@ pub fn load_dicts(s2t_path: &str, t2s_path: &str, enabled: bool) -> (usize, usiz
     let mut n1 = 0;
     let mut n2 = 0;
     if enabled {
-        if let Ok(mut g) = slot(true).lock() {
+        {
+            let mut g = slot(true).lock().unwrap_or_else(|e| e.into_inner());
             *g = build(s2t_path);
             n1 = g.as_ref().map(entries).unwrap_or(0);
         }
-        if let Ok(mut g) = slot(false).lock() {
+        {
+            let mut g = slot(false).lock().unwrap_or_else(|e| e.into_inner());
             *g = build(t2s_path);
             n2 = g.as_ref().map(entries).unwrap_or(0);
         }
     } else {
-        if let Ok(mut g) = slot(true).lock() {
+        {
+            let mut g = slot(true).lock().unwrap_or_else(|e| e.into_inner());
             *g = None;
         }
-        if let Ok(mut g) = slot(false).lock() {
+        {
+            let mut g = slot(false).lock().unwrap_or_else(|e| e.into_inner());
             *g = None;
         }
     }
@@ -72,14 +76,14 @@ pub fn load_dicts(s2t_path: &str, t2s_path: &str, enabled: bool) -> (usize, usiz
 }
 
 pub fn ready(trad: bool) -> bool {
-    slot(trad).lock().map(|g| g.is_some()).unwrap_or(false)
+    slot(trad)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_some()
 }
 
 fn convert(trad: bool, text: &str) -> String {
-    let guard = match slot(trad).lock() {
-        Ok(g) => g,
-        Err(_) => return text.to_string(),
-    };
+    let guard = slot(trad).lock().unwrap_or_else(|e| e.into_inner());
     let Some(idx) = guard.as_ref() else {
         return text.to_string();
     };

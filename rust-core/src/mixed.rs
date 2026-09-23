@@ -96,7 +96,8 @@ fn word_freq(eng: &PinyinEngine, word: &str) -> u64 {
         static C: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
         C.get_or_init(|| Mutex::new(HashMap::new()))
     }
-    if let Ok(c) = cache().lock() {
+    {
+        let c = cache().lock().unwrap_or_else(|e| e.into_inner());
         if let Some(f) = c.get(word) {
             return *f;
         }
@@ -112,7 +113,8 @@ fn word_freq(eng: &PinyinEngine, word: &str) -> u64 {
             }
         }
     }
-    if let Ok(mut c) = cache().lock() {
+    {
+        let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
         c.insert(word.to_string(), freq);
     }
     freq
@@ -124,7 +126,8 @@ fn chars_for_initial(eng: &PinyinEngine, letter: char, k: usize) -> Vec<(String,
         static C: OnceLock<CharCache> = OnceLock::new();
         C.get_or_init(|| Mutex::new(HashMap::new()))
     }
-    if let Ok(c) = cache().lock() {
+    {
+        let c = cache().lock().unwrap_or_else(|e| e.into_inner());
         if let Some(hit) = c.get(&letter) {
             return hit.iter().take(k).cloned().collect();
         }
@@ -138,7 +141,8 @@ fn chars_for_initial(eng: &PinyinEngine, letter: char, k: usize) -> Vec<(String,
         });
     hits.sort_by_key(|x| std::cmp::Reverse(x.0));
     let list: Vec<(String, u64)> = hits.into_iter().take(8).map(|(f, w)| (w, f)).collect();
-    if let Ok(mut c) = cache().lock() {
+    {
+        let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
         c.insert(letter, list.clone());
     }
     list.into_iter().take(k).collect()
@@ -150,7 +154,8 @@ fn run_candidates(eng: &PinyinEngine, run: &str, k: usize) -> Vec<(String, u64)>
         static C: OnceLock<RunCache> = OnceLock::new();
         C.get_or_init(|| Mutex::new(HashMap::new()))
     }
-    if let Ok(c) = cache().lock() {
+    {
+        let c = cache().lock().unwrap_or_else(|e| e.into_inner());
         if let Some(hit) = c.get(run) {
             return hit.iter().take(k).cloned().collect();
         }
@@ -180,7 +185,8 @@ fn run_candidates(eng: &PinyinEngine, run: &str, k: usize) -> Vec<(String, u64)>
         sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
     });
     out.truncate(16);
-    if let Ok(mut c) = cache().lock() {
+    {
+        let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
         c.insert(run.to_string(), out.clone());
     }
     out

@@ -87,7 +87,8 @@ pub fn load_bytes(data: Vec<u8>) -> usize {
         gram_blob,
     };
     let n = bank.sent_count;
-    if let Ok(mut g) = slot().lock() {
+    {
+        let mut g = slot().lock().unwrap_or_else(|e| e.into_inner());
         *g = Some(bank);
     }
     n
@@ -101,10 +102,8 @@ pub fn load(path: &str) -> usize {
 }
 
 pub fn size() -> usize {
-    slot()
-        .lock()
-        .map(|g| g.as_ref().map(|b| b.sent_count).unwrap_or(0))
-        .unwrap_or(0)
+    let g = slot().lock().unwrap_or_else(|e| e.into_inner());
+    g.as_ref().map(|b| b.sent_count).unwrap_or(0)
 }
 
 fn bigrams(text: &str) -> Vec<String> {
@@ -205,9 +204,7 @@ pub fn lookup(zh: &str, limit: usize) -> Vec<(String, u32)> {
     if text.is_empty() || limit == 0 {
         return Vec::new();
     }
-    let Ok(g) = slot().lock() else {
-        return Vec::new();
-    };
+    let g = slot().lock().unwrap_or_else(|e| e.into_inner());
     let Some(b) = g.as_ref() else {
         return Vec::new();
     };

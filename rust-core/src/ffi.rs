@@ -334,8 +334,22 @@ pub extern "system" fn Java_com_typesake_app_TypesakeCore_bumpStats<'local>(
     jtoday: JString<'local>,
 ) -> JString<'local> {
     let today = jstr_to_rust(&mut env, &jtoday);
+    // 只改内存态（合并写入：落盘由选词时的 persist 与 flushStorage 兜底）
     let out = guarded(|| match store::bump_stats(1, &today) {
         Ok(()) => ok_json(&format!("\"words\":{}", store::stats().words)),
+        Err(e) => err_json(&e),
+    });
+    rust_to_jstr(&mut env, &out)
+}
+
+/// 主动落盘：把内存中的统计计数等写盘（Kotlin 侧在 onFinishInput 调用兜底）。
+#[no_mangle]
+pub extern "system" fn Java_com_typesake_app_TypesakeCore_flushStorage<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> JString<'local> {
+    let out = guarded(|| match store::persist() {
+        Ok(()) => ok_json("\"saved\":1"),
         Err(e) => err_json(&e),
     });
     rust_to_jstr(&mut env, &out)

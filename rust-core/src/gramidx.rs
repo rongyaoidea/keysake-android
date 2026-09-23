@@ -65,7 +65,8 @@ pub fn load_bytes(data: Vec<u8>) -> usize {
         val_base,
     };
     let n = idx.count;
-    if let Ok(mut g) = slot().lock() {
+    {
+        let mut g = slot().lock().unwrap_or_else(|e| e.into_inner());
         *g = Some(idx);
     }
     n
@@ -79,10 +80,8 @@ pub fn load(path: &str) -> usize {
 }
 
 pub fn size() -> usize {
-    slot()
-        .lock()
-        .map(|g| g.as_ref().map(|i| i.count).unwrap_or(0))
-        .unwrap_or(0)
+    let g = slot().lock().unwrap_or_else(|e| e.into_inner());
+    g.as_ref().map(|i| i.count).unwrap_or(0)
 }
 
 impl Idx {
@@ -121,7 +120,7 @@ pub fn lookup(gram: &str, limit: usize) -> Vec<String> {
     if gram.is_empty() || limit == 0 {
         return out;
     }
-    let Ok(g) = slot().lock() else { return out };
+    let g = slot().lock().unwrap_or_else(|e| e.into_inner());
     let Some(i) = g.as_ref() else { return out };
     let key = gram.as_bytes();
     let at = i.lower_bound(key);

@@ -57,7 +57,10 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     private lateinit var candidateScroll: HorizontalScrollView
     private lateinit var englishScroll: HorizontalScrollView
 
-    private val io = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /** 文件 IO / 持久化（初始化、收藏、置顶、落盘），不占 CPU 线程 */
+    private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /** CPU 密集的候选查询（analyze / more / t9），与文件 IO 互不拖累 */
+    private val cpu = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var lookupJob: Job? = null
 
     private val pinyin = StringBuilder()
@@ -133,6 +136,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         prefs.unregisterListener(prefsListener)
         unregisterClipboard()
         io.cancel()
+        cpu.cancel()
         super.onDestroy()
     }
 
@@ -233,6 +237,8 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     override fun onFinishInput() {
         clearComposing()
         if (::keyboard.isInitialized) keyboard.setClipboardItems(clipItems.toList())
+        // 统计计数平时只在内存（合并写入），收尾时统一落盘
+        io.launch { TypesakeCore.flush() }
         super.onFinishInput()
     }
 
@@ -298,6 +304,8 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         candidates = emptyList()
         match = null
         lastCommittedChinese = ""
+        pageStart = 0
+        allCandidates = emptyList()
     }
 
     private fun refreshBars() {
@@ -624,22 +632,37 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         }
         row.addView(
             chip("置顶", colors.accentText, colors.accent, onClick = {
-                TypesakeCore.pin(popupPinyin, popupWord)
+                val p = popupPinyin
+                val w = popupWord
+                val fallback = candidates
                 dismissActionPopup()
-                candidates = TypesakeCore.cached(popupPinyin) ?: candidates
-                match = match?.copy(candidates = candidates)
-                renderCandidates()
-                toast("已置顶：$popupWord")
+                // pin 会触发落盘（fsync），移出主线程
+                io.launch {
+                    TypesakeCore.pin(p, w)
+                    val updated = TypesakeCore.cached(p) ?: fallback
+                    withContext(Dispatchers.Main) {
+                        candidates = updated
+                        match = match?.copy(candidates = updated)
+                        renderCandidates()
+                        toast("已置顶：$w")
+                    }
+                }
             })
         )
         row.addView(
             chip("删词", colors.keyText, colors.key, onClick = {
-                val updated = TypesakeCore.forget(popupPinyin, popupWord)
+                val p = popupPinyin
+                val w = popupWord
                 dismissActionPopup()
-                candidates = updated
-                match = match?.copy(candidates = updated)
-                renderCandidates()
-                toast("已删除：$popupWord")
+                io.launch {
+                    val updated = TypesakeCore.forget(p, w)
+                    withContext(Dispatchers.Main) {
+                        candidates = updated
+                        match = match?.copy(candidates = updated)
+                        renderCandidates()
+                        toast("已删除：$w")
+                    }
+                }
             })
         )
         val popup = PopupWindow(row, ViewGroup.LayoutParams.WRAP_CONTENT, dp(44), true).apply {
@@ -757,6 +780,9 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         pinyin.append(letterText.lowercase())
         selfEdit = true
         digitRun.setLength(0)
+        // 输入串变了，翻页状态必须归零，否则会显示上一串的候选页
+        pageStart = 0
+        allCandidates = emptyList()
         ic.setComposingText(pinyin.toString(), 1)
         val cached = TypesakeCore.cached(pinyin.toString())
         candidates = cached ?: emptyList()
@@ -771,7 +797,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
 
     private fun requestCandidates(p: String) {
         lookupJob?.cancel()
-        lookupJob = io.launch {
+        lookupJob = cpu.launch {
             delay(15)
             if (t9Mode) {
                 val list = TypesakeCore.t9(p)
@@ -859,7 +885,7 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
     private fun showMoreCandidates() {
         val typed = if (t9Mode) t9buf.toString() else pinyin.toString()
         if (typed.isEmpty()) return
-        io.launch {
+        cpu.launch {
             val list = TypesakeCore.more(typed)
             withContext(Dispatchers.Main) { showListPopup(list) }
         }
@@ -1016,6 +1042,9 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
         if (pinyin.isNotEmpty()) {
             pinyin.deleteCharAt(pinyin.length - 1)
             selfEdit = true
+            // 输入串变了，翻页状态归零（否则显示上一串的候选页）
+            pageStart = 0
+            allCandidates = emptyList()
             if (pinyin.isEmpty()) {
                 ic.setComposingText("", 1)
                 candidates = emptyList()
@@ -1163,18 +1192,24 @@ class TypesakeImeService : InputMethodService(), KeyboardView.Listener {
             toast("先输入一句中文，再点 ★ 或双击空格收藏")
             return
         }
-        val english = TypesakeCore.suggest(sentence)
-        val ok = TypesakeCore.save(sentence, english)
-        if (ok) phrases = loadPhrases()
-        toast(
-            if (!ok) {
-                "收藏失败"
-            } else if (english.isEmpty()) {
-                "已收藏 ★ $sentence（英文待补）"
-            } else {
-                "已收藏 ★ $sentence → $english"
+        // 查词 + 收藏落盘（fsync）都移出主线程，避免双击空格时卡 UI
+        io.launch {
+            val english = TypesakeCore.suggest(sentence)
+            val ok = TypesakeCore.save(sentence, english)
+            val updated = if (ok) loadPhrases() else null
+            withContext(Dispatchers.Main) {
+                if (updated != null) phrases = updated
+                toast(
+                    if (!ok) {
+                        "收藏失败"
+                    } else if (english.isEmpty()) {
+                        "已收藏 ★ $sentence（英文待补）"
+                    } else {
+                        "已收藏 ★ $sentence → $english"
+                    }
+                )
             }
-        )
+        }
     }
 
     // ---------------- 剪贴板 ----------------

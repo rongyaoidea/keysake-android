@@ -10,10 +10,10 @@ concurrency:
   group: android-${{ github.ref }}
   cancel-in-progress: true
 
-# 三个 job 相互独立、并行：
+# 三个 job：
 # - rust : 引擎质量门禁（fmt / clippy / 单测）
-# - test : Kotlin 单测 + lint（失败只让本 job 变红，不阻塞产物）
-# - apk  : 只负责产出可安装 APK（.so 构建失败也照常出包，走 Kotlin 兜底）
+# - test : Kotlin 单测 + lint
+# - apk  : 产出可安装 APK —— 必须等 rust + test 全绿（测试红了不出包）
 jobs:
   rust:
     runs-on: ubuntu-latest
@@ -80,6 +80,7 @@ jobs:
             app/build/reports/lint-results-*.html
 
   apk:
+    needs: [rust, test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

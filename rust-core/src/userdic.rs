@@ -70,7 +70,8 @@ fn domains() -> &'static Mutex<Vec<(String, u32)>> {
 }
 
 pub fn set_domains(items: Vec<(String, u32)>) {
-    if let Ok(mut d) = domains().lock() {
+    {
+        let mut d = domains().lock().unwrap_or_else(|e| e.into_inner());
         *d = items;
         d.truncate(50);
     }
@@ -82,7 +83,8 @@ pub fn remember_domain(domain: &str) -> Vec<(String, u32)> {
     if d.is_empty() {
         return out;
     }
-    if let Ok(mut list) = domains().lock() {
+    {
+        let mut list = domains().lock().unwrap_or_else(|e| e.into_inner());
         if let Some(e) = list.iter_mut().find(|(x, _)| *x == d) {
             e.1 = e.1.saturating_add(1);
         } else {
@@ -96,7 +98,7 @@ pub fn remember_domain(domain: &str) -> Vec<(String, u32)> {
 }
 
 pub fn domains_snapshot() -> Vec<(String, u32)> {
-    domains().lock().map(|d| d.clone()).unwrap_or_default()
+    domains().lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 #[cfg(test)]

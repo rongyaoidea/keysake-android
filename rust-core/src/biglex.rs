@@ -63,7 +63,8 @@ pub fn load_bytes(data: Vec<u8>) -> usize {
         data,
     };
     let n = lex.count;
-    if let Ok(mut g) = slot().lock() {
+    {
+        let mut g = slot().lock().unwrap_or_else(|e| e.into_inner());
         *g = Some(lex);
     }
     n
@@ -77,10 +78,8 @@ pub fn load(path: &str) -> usize {
 }
 
 pub fn size() -> usize {
-    slot()
-        .lock()
-        .map(|g| g.as_ref().map(|l| l.count).unwrap_or(0))
-        .unwrap_or(0)
+    let g = slot().lock().unwrap_or_else(|e| e.into_inner());
+    g.as_ref().map(|l| l.count).unwrap_or(0)
 }
 
 impl Lex {
@@ -118,7 +117,7 @@ impl Lex {
 /// 精确命中（同一拼音可能对应多个词）。
 pub fn exact(pinyin: &str, limit: usize) -> Vec<String> {
     let mut out = Vec::new();
-    let Ok(g) = slot().lock() else { return out };
+    let g = slot().lock().unwrap_or_else(|e| e.into_inner());
     let Some(l) = g.as_ref() else { return out };
     let key = pinyin.as_bytes();
     let mut i = l.lower_bound(key);
@@ -142,7 +141,7 @@ pub fn prefix(pinyin: &str, limit: usize) -> Vec<String> {
     if pinyin.len() < 3 {
         return out;
     }
-    let Ok(g) = slot().lock() else { return out };
+    let g = slot().lock().unwrap_or_else(|e| e.into_inner());
     let Some(l) = g.as_ref() else { return out };
     let key = pinyin.as_bytes();
     let mut i = l.lower_bound(key);

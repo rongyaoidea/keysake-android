@@ -761,7 +761,8 @@ fn memory() -> &'static Mutex<Vec<(String, String)>> {
 }
 
 pub fn set_memory(items: Vec<(String, String)>) {
-    if let Ok(mut m) = memory().lock() {
+    {
+        let mut m = memory().lock().unwrap_or_else(|e| e.into_inner());
         *m = items
             .into_iter()
             .filter(|(cn, en)| !cn.trim().is_empty() && !en.trim().is_empty())
@@ -794,7 +795,8 @@ pub fn load_dict(path: &str) -> usize {
     }
     let n = map.len();
     if n > 0 {
-        if let Ok(mut m) = big_dict().lock() {
+        {
+            let mut m = big_dict().lock().unwrap_or_else(|e| e.into_inner());
             *m = map;
         }
     }
@@ -802,17 +804,21 @@ pub fn load_dict(path: &str) -> usize {
 }
 
 pub fn dict_size() -> usize {
-    big_dict().lock().map(|m| m.len()).unwrap_or(0)
+    big_dict().lock().unwrap_or_else(|e| e.into_inner()).len()
 }
 
 fn dict_exact(zh: &str) -> Option<String> {
-    big_dict().lock().ok().and_then(|m| m.get(zh).cloned())
+    big_dict()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(zh)
+        .cloned()
 }
 
 /// 最长匹配（1..=6 字）。
 fn dict_longest(chars: &[char], start: usize) -> Option<(usize, String)> {
     let max = (chars.len() - start).min(6);
-    let map = big_dict().lock().ok()?;
+    let map = big_dict().lock().unwrap_or_else(|e| e.into_inner());
     for len in (1..=max).rev() {
         let seg: String = chars[start..start + len].iter().collect();
         if let Some(v) = map.get(&seg) {
@@ -1601,7 +1607,8 @@ pub fn english_candidates(text: &str) -> Vec<(u8, String)> {
     } else {
         vec![t, simp.as_str()]
     };
-    if let Ok(m) = memory().lock() {
+    {
+        let m = memory().lock().unwrap_or_else(|e| e.into_inner());
         for key in &lookup_keys {
             if let Some((_, en)) = m.iter().find(|(cn, _)| cn == key) {
                 push(&mut out, KIND_MINE, en.clone());

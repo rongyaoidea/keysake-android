@@ -114,6 +114,7 @@ object TypesakeCore {
     @JvmStatic private external fun blockedWords(): String
     @JvmStatic private external fun unblockWord(pinyin: String, word: String): String
     @JvmStatic private external fun bumpStats(today: String): String
+    @JvmStatic private external fun flushStorage(): String
     @JvmStatic private external fun statsInfo(): String
     @JvmStatic private external fun suggestEnglish(chinese: String): String
     @JvmStatic private external fun englishCandidates(chinese: String): String
@@ -366,10 +367,16 @@ object TypesakeCore {
             .getOrDefault(false)
     }
 
-    /** 记一次上屏（词数 + 当天活跃）。 */
+    /** 记一次上屏（词数 + 当天活跃）。只改内存态，落盘由选词时的写入与 [flush] 兜底。 */
     fun bump(today: String) {
         if (!available) return
         runCatching { bumpStats(today) }
+    }
+
+    /** 把内存态（统计计数等）落盘；在输入收尾（onFinishInput）时调用。 */
+    fun flush() {
+        if (!available) return
+        runCatching { flushStorage() }
     }
 
     fun stats(): Stats {

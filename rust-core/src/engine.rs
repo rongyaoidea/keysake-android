@@ -51,7 +51,8 @@ pub fn set_options(fuzzy: bool, correction: bool, shuangpin_scheme: u8) {
     FUZZY_ENABLED.store(fuzzy, Ordering::Relaxed);
     CORRECTION_ENABLED.store(correction, Ordering::Relaxed);
     SHUANGPIN.store(shuangpin_scheme, Ordering::Relaxed);
-    if let Ok(mut c) = cache().lock() {
+    {
+        let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
         c.clear();
     }
     t9::clear_cache();
@@ -74,13 +75,17 @@ fn last_error() -> &'static Mutex<String> {
 
 /// 记录最近一次引擎级错误（供设置页「引擎自检」展示）。
 pub fn note_error(msg: &str) {
-    if let Ok(mut e) = last_error().lock() {
+    {
+        let mut e = last_error().lock().unwrap_or_else(|e| e.into_inner());
         *e = msg.to_string();
     }
 }
 
 pub fn last_error_snapshot() -> String {
-    last_error().lock().map(|e| e.clone()).unwrap_or_default()
+    last_error()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
 }
 
 fn context() -> &'static Mutex<(String, String)> {
@@ -94,7 +99,8 @@ pub fn set_context(word: &str) {
     if w.is_empty() {
         return;
     }
-    if let Ok(mut c) = context().lock() {
+    {
+        let mut c = context().lock().unwrap_or_else(|e| e.into_inner());
         let prev = c.1.clone();
         c.0 = prev;
         c.1 = w.to_string();
@@ -102,10 +108,8 @@ pub fn set_context(word: &str) {
 }
 
 fn context_words() -> (String, String) {
-    context()
-        .lock()
-        .map(|c| (c.0.clone(), c.1.clone()))
-        .unwrap_or_default()
+    let c = context().lock().unwrap_or_else(|e| e.into_inner());
+    (c.0.clone(), c.1.clone())
 }
 
 /// 用上词做 bigram 重排（只动前 5 个，避免打散精确匹配）。
@@ -186,20 +190,18 @@ fn learned() -> &'static Mutex<HashMap<String, (String, u32)>> {
 }
 
 pub fn export_learned() -> Vec<(String, String, u32)> {
-    let mut v: Vec<(String, String, u32)> = learned()
-        .lock()
-        .map(|m| {
-            m.iter()
-                .map(|(k, (w, c))| (k.clone(), w.clone(), *c))
-                .collect()
-        })
-        .unwrap_or_default();
+    let m = learned().lock().unwrap_or_else(|e| e.into_inner());
+    let mut v: Vec<(String, String, u32)> = m
+        .iter()
+        .map(|(k, (w, c))| (k.clone(), w.clone(), *c))
+        .collect();
     v.sort();
     v
 }
 
 pub fn import_learned(items: Vec<(String, String, u32)>) {
-    if let Ok(mut m) = learned().lock() {
+    {
+        let mut m = learned().lock().unwrap_or_else(|e| e.into_inner());
         m.clear();
         for (typed, word, count) in items {
             if !typed.is_empty() && !word.is_empty() {
@@ -215,7 +217,8 @@ pub fn remember(typed: &str, word: &str) {
     if key.is_empty() || word.is_empty() {
         return;
     }
-    if let Ok(mut m) = learned().lock() {
+    {
+        let mut m = learned().lock().unwrap_or_else(|e| e.into_inner());
         if m.len() > 400 {
             m.clear();
         }
@@ -235,20 +238,18 @@ fn blocked() -> &'static Mutex<HashMap<String, Vec<String>>> {
 }
 
 pub fn export_blocked() -> Vec<(String, String)> {
-    let mut v: Vec<(String, String)> = blocked()
-        .lock()
-        .map(|m| {
-            m.iter()
-                .flat_map(|(p, words)| words.iter().map(move |w| (p.clone(), w.clone())))
-                .collect()
-        })
-        .unwrap_or_default();
+    let m = blocked().lock().unwrap_or_else(|e| e.into_inner());
+    let mut v: Vec<(String, String)> = m
+        .iter()
+        .flat_map(|(p, words)| words.iter().map(move |w| (p.clone(), w.clone())))
+        .collect();
     v.sort();
     v
 }
 
 pub fn import_blocked(items: Vec<(String, String)>) {
-    if let Ok(mut m) = blocked().lock() {
+    {
+        let mut m = blocked().lock().unwrap_or_else(|e| e.into_inner());
         m.clear();
         for (p, w) in items {
             if !p.is_empty() && !w.is_empty() {
@@ -259,18 +260,18 @@ pub fn import_blocked(items: Vec<(String, String)>) {
 }
 
 fn is_blocked(pinyin: &str, word: &str) -> bool {
-    blocked()
-        .lock()
-        .ok()
-        .and_then(|m| {
-            m.get(&normalize(pinyin))
-                .map(|v| v.iter().any(|w| w == word))
-        })
+    let m = blocked().lock().unwrap_or_else(|e| e.into_inner());
+    m.get(&normalize(pinyin))
+        .map(|v| v.iter().any(|w| w == word))
         .unwrap_or(false)
 }
 
 fn filter_blocked(pinyin: &str, list: Vec<String>) -> Vec<String> {
-    if blocked().lock().map(|m| m.is_empty()).unwrap_or(true) {
+    if blocked()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_empty()
+    {
         return list;
     }
     list.into_iter()
@@ -282,8 +283,9 @@ fn learned_for(typed: &str) -> Option<String> {
     let key = normalize(typed);
     let word = learned()
         .lock()
-        .ok()
-        .and_then(|m| m.get(&key).map(|(w, _)| w.clone()))?;
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&key)
+        .map(|(w, _)| w.clone())?;
     if is_blocked(&key, &word) {
         return None;
     }
@@ -527,7 +529,8 @@ pub fn candidates(input: &str, limit: usize) -> Vec<String> {
     if compact.is_empty() {
         return Vec::new();
     }
-    if let Ok(c) = cache().lock() {
+    {
+        let c = cache().lock().unwrap_or_else(|e| e.into_inner());
         if let Some(hit) = c.get(&compact) {
             let mut v = hit.clone();
             v.truncate(limit);
@@ -535,7 +538,8 @@ pub fn candidates(input: &str, limit: usize) -> Vec<String> {
         }
     }
     let out = candidates_with(engine(), &compact, limit);
-    if let Ok(mut c) = cache().lock() {
+    {
+        let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
         if c.len() >= CACHE_CAP {
             c.clear();
         }
@@ -856,7 +860,8 @@ pub fn record_pick(pinyin: &str, word: &str, limit: usize) -> Vec<String> {
         return Vec::new();
     }
     engine().dict().record_pick(&compact, word);
-    if let Ok(mut c) = cache().lock() {
+    {
+        let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
         c.remove(&compact);
     }
     t9::clear_cache();
@@ -871,7 +876,8 @@ pub fn pin(pinyin: &str, word: &str, limit: usize) -> Vec<String> {
         return Vec::new();
     }
     engine().dict().pin(&compact, word);
-    if let Ok(mut c) = cache().lock() {
+    {
+        let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
         c.remove(&compact);
     }
     candidates_with(engine(), &compact, limit)
@@ -886,7 +892,8 @@ pub fn blocked_words() -> Vec<(String, String)> {
 pub fn unblock(pinyin: &str, word: &str) -> usize {
     let (p, w) = (normalize(pinyin), word.trim().to_string());
     let mut n = 0;
-    if let Ok(mut b) = blocked().lock() {
+    {
+        let mut b = blocked().lock().unwrap_or_else(|e| e.into_inner());
         if let Some(v) = b.get_mut(&p) {
             let before = v.len();
             v.retain(|x| x != &w);
@@ -896,7 +903,8 @@ pub fn unblock(pinyin: &str, word: &str) -> usize {
             }
         }
     }
-    if let Ok(mut c) = cache().lock() {
+    {
+        let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
         c.clear();
     }
     t9::clear_cache();
@@ -912,16 +920,19 @@ pub fn forget(pinyin: &str, word: &str, limit: usize) -> Vec<String> {
     }
     engine().dict().forget(&compact);
     t9::clear_cache();
-    if let Ok(mut b) = blocked().lock() {
+    {
+        let mut b = blocked().lock().unwrap_or_else(|e| e.into_inner());
         let v = b.entry(compact.clone()).or_default();
         if !v.iter().any(|w| w == word) {
             v.push(word.to_string());
         }
     }
-    if let Ok(mut l) = learned().lock() {
+    {
+        let mut l = learned().lock().unwrap_or_else(|e| e.into_inner());
         l.retain(|k, (w, _)| !(w == word && k == &compact));
     }
-    if let Ok(mut c) = cache().lock() {
+    {
+        let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
         c.remove(&compact);
         c.clear();
     }
@@ -957,7 +968,8 @@ pub fn export_l0() -> L0Snapshot {
 }
 
 pub fn import_l0(pins: Vec<(String, String)>, pick_counts: Vec<(String, String, u32)>) -> usize {
-    if let Ok(mut c) = cache().lock() {
+    {
+        let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
         c.clear();
     }
     engine().dict().import_l0(L0Snapshot { pins, pick_counts })

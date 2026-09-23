@@ -96,7 +96,8 @@ pub fn candidates(digits: &str, limit: usize) -> Vec<String> {
     if key.is_empty() || limit == 0 {
         return Vec::new();
     }
-    if let Ok(c) = cache().lock() {
+    {
+        let c = cache().lock().unwrap_or_else(|e| e.into_inner());
         if let Some(hit) = c.get(&key) {
             let mut v = hit.clone();
             v.truncate(limit);
@@ -135,7 +136,8 @@ pub fn candidates(digits: &str, limit: usize) -> Vec<String> {
             }
         }
     }
-    if let Ok(mut c) = cache().lock() {
+    {
+        let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
         if c.len() >= CACHE_CAP {
             c.clear();
         }
@@ -146,7 +148,8 @@ pub fn candidates(digits: &str, limit: usize) -> Vec<String> {
 
 /// 清缓存（学习/删词后调用）。
 pub fn clear_cache() {
-    if let Ok(mut c) = cache().lock() {
+    {
+        let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
         c.clear();
     }
 }
